@@ -2,6 +2,7 @@
 import hashlib
 import json
 import time
+import re
 from app.security.auth import VerifiedAccessToken
 
 
@@ -11,10 +12,12 @@ class ApprovalPolicy:
 
     def eligible(self, principal, payload, context):
         s = self.settings
+        tested = ((s.approval_mode == 'chatgpt_native' and s.chatgpt_confirmation_tested
+                   and re.fullmatch(r'[a-f0-9]{64}', s.chatgpt_confirmation_evidence_sha256))
+                  or (s.approval_mode == 'chatgpt_direct' and s.chatgpt_direct_tested
+                   and re.fullmatch(r'[a-f0-9]{64}', s.chatgpt_direct_evidence_sha256)))
         # Recheck every gate at execution time, including after config changes.
-        return bool(s.approval_mode == 'chatgpt_native' and s.auth_mode == 'oauth'
-            and s.chatgpt_confirmation_tested and s.chatgpt_residual_risk_accepted
-            and len(s.chatgpt_confirmation_evidence_sha256) == 64
+        return bool(tested and s.auth_mode == 'oauth' and s.chatgpt_residual_risk_accepted
             and isinstance(context, VerifiedAccessToken)
             and context.authentication_method == 'oauth' and context.client_id == principal
             and context.expires_at and context.expires_at > time.time()
@@ -30,7 +33,8 @@ class ApprovalPolicy:
         values = [s.approval_mode, s.oauth_issuer, s.oauth_audience,
                   sorted(s.chatgpt_allowed_client_ids), sorted(s.chatgpt_allowed_principals), sorted(s.publishing_allowed_subjects),
                   sorted(s.chatgpt_allowed_operations), sorted(s.meta_write_account_ids), s.chatgpt_confirmation_tested,
-                  s.chatgpt_confirmation_evidence_sha256, s.chatgpt_residual_risk_accepted]
+                  s.chatgpt_confirmation_evidence_sha256, s.chatgpt_direct_tested,
+                  s.chatgpt_direct_evidence_sha256, s.chatgpt_residual_risk_accepted]
         return hashlib.sha256(json.dumps(values, separators=(',', ':')).encode()).hexdigest()
 
     def requirements(self, principal, payload, context=None):
@@ -40,8 +44,11 @@ class ApprovalPolicy:
                 'independent_owner_required': not eligible,
                 'native_confirmation_receipt_verified': False,
                 'native_host_test_recorded': self.settings.chatgpt_confirmation_tested,
+                'direct_instruction_test_recorded': self.settings.chatgpt_direct_tested,
+                'consent_basis': ('authenticated_chat_directive_reliance' if eligible and self.settings.approval_mode == 'chatgpt_direct'
+                                 else 'native_host_confirmation_reliance' if eligible else 'independent_owner'),
                 'residual_risk': 'The server cannot independently verify a user chat confirmation; an authenticated client call is not a consent receipt.',
                 'stronger_channels': ['owner_portal', 'owner_cli'],
                 'portal_available': self.settings.approval_portal_enabled,
-                'next_step': 'Review the exact preview in ChatGPT; respect native host confirmations. Execute only this publication.' if eligible else
+                'next_step': 'Execute only the exact publication explicitly requested and reviewed by the user in ChatGPT; respect any host confirmation. The server cannot independently verify that instruction.' if eligible else
                              'Review in ChatGPT. The current security policy still requires a separate trusted owner grant.'}

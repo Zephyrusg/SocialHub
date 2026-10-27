@@ -54,9 +54,11 @@ class Settings(BaseSettings):
     meta_live_writes: bool = False
     meta_write_account_ids: list[Literal['pixelpapa-facebook', 'pixelpapa-instagram']] = []
     publishing_enabled: bool = False
-    approval_mode: Literal['owner_required', 'chatgpt_native'] = 'owner_required'
+    approval_mode: Literal['owner_required', 'chatgpt_native', 'chatgpt_direct'] = 'owner_required'
     chatgpt_confirmation_tested: bool = False
     chatgpt_confirmation_evidence_sha256: str = ''
+    chatgpt_direct_tested: bool = False
+    chatgpt_direct_evidence_sha256: str = ''
     chatgpt_residual_risk_accepted: bool = False
     chatgpt_allowed_client_ids: list[str] = []
     chatgpt_allowed_principals: list[str] = []
@@ -98,12 +100,14 @@ class Settings(BaseSettings):
             raise ValueError('Phase 2A requires Graph API v26.0')
         if self.meta_live_writes and not self.publishing_enabled:
             raise ValueError('Phase 2A write guard: enable the approval-backed publishing service before live writes')
-        if self.approval_mode == 'chatgpt_native':
+        if self.approval_mode in {'chatgpt_native', 'chatgpt_direct'}:
             import re
-            if not (self.auth_mode == 'oauth' and self.chatgpt_confirmation_tested
+            tested = (self.chatgpt_confirmation_tested if self.approval_mode == 'chatgpt_native' else self.chatgpt_direct_tested)
+            evidence = (self.chatgpt_confirmation_evidence_sha256 if self.approval_mode == 'chatgpt_native' else self.chatgpt_direct_evidence_sha256)
+            if not (self.auth_mode == 'oauth' and tested
                     and self.chatgpt_residual_risk_accepted and self.chatgpt_allowed_client_ids
                     and self.chatgpt_allowed_principals and self.chatgpt_allowed_operations
-                    and re.fullmatch(r'[a-f0-9]{64}', self.chatgpt_confirmation_evidence_sha256)):
+                    and re.fullmatch(r'[a-f0-9]{64}', evidence)):
                 raise ValueError('ChatGPT policy requires OAuth identities, recorded host tests and explicit operator risk acceptance')
             if any(not value.strip() or len(value) > 128 for value in self.chatgpt_allowed_client_ids + self.chatgpt_allowed_principals):
                 raise ValueError('ChatGPT identity allowlists require bounded nonempty exact identifiers')

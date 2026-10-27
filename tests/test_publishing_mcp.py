@@ -86,7 +86,8 @@ async def test_reconciliation_refuses_original_old_post(publisher,sessions):
         await service.reconcile(preview['publication_id'],tid,'old_post','owner')
 
 
-async def test_chatgpt_policy_uses_signed_client_identity_through_real_mcp(tmp_path,monkeypatch):
+@pytest.mark.parametrize('mode', ['chatgpt_native', 'chatgpt_direct'])
+async def test_chatgpt_policy_uses_signed_client_identity_through_real_mcp(tmp_path,monkeypatch,mode):
     import time
     from types import SimpleNamespace
     import jwt
@@ -97,8 +98,9 @@ async def test_chatgpt_policy_uses_signed_client_identity_through_real_mcp(tmp_p
         oauth_allowed_subjects=['alice'],publishing_allowed_subjects=['alice'],oauth_allowed_client_ids=['real-client','impostor'],auth_mode='oauth',oauth_issuer='https://issuer.example/',oauth_jwks_url='https://issuer.example/keys',
         oauth_audience='https://hub.example/mcp',public_url='https://hub.example/mcp',
         meta_app_id='12345',meta_app_secret='fake-app-secret',meta_live_reads=True,
-        publishing_enabled=True,meta_live_writes=True,meta_write_account_ids=["pixelpapa-facebook","pixelpapa-instagram"],approval_mode='chatgpt_native',
-        chatgpt_confirmation_tested=True,chatgpt_confirmation_evidence_sha256='e'*64,
+        publishing_enabled=True,meta_live_writes=True,meta_write_account_ids=["pixelpapa-facebook","pixelpapa-instagram"],approval_mode=mode,
+        chatgpt_confirmation_tested=mode=='chatgpt_native',chatgpt_confirmation_evidence_sha256='e'*64 if mode=='chatgpt_native' else '',
+        chatgpt_direct_tested=mode=='chatgpt_direct',chatgpt_direct_evidence_sha256='d'*64 if mode=='chatgpt_direct' else '',
         chatgpt_residual_risk_accepted=True,chatgpt_allowed_client_ids=['real-client'],chatgpt_allowed_principals=['alice'],
         media_root=str(tmp_path/'media'))
     await MetaOAuth(s,sessions,httpx.MockTransport(MetaFixture())).connect('long-user')

@@ -39,3 +39,5 @@ The optional `/admin/` UI uses an independent confidential OIDC client, recent p
 Origin rejection diagnostics contain only fixed reason categories and whether the request targeted administration. They never record supplied origin values, request bodies, URLs, cookies or credentials. Diagnostics do not relax the exact-origin boundary.
 
 Real-account writes additionally require the explicit `META_WRITE_ACCOUNT_IDS` allowlist (empty by default). Facebook-only preparation and the disabled-write host confirmation test are documented in [Facebook write readiness](facebook-write-readiness.md). Account permission is separate from an owner grant and from the two global publishing switches.
+
+An explicitly accepted [chat-first policy](chat-first-approval.md) may rely on either tested native host confirmation or separately tested direct user instructions through an exact authenticated client. Both expose that consent is not independently verified; neither can be activated by a model-supplied approval flag. The default independent-owner policy is unchanged.

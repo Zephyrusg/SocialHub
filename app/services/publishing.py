@@ -215,6 +215,8 @@ class PublishingService:
                 db.add(Audit(subject=principal, operation='authorize_publication_policy', outcome='success',
                     details={'publication_id': item.id, 'request_hash': item.request_hash, 'channel': 'chatgpt_policy',
                              'oauth_client_id': context.oauth_client_id, 'policy_sha256': approval.evidence_hash,
+                             'approval_mode': self.settings.approval_mode,
+                             'native_confirmation_verified': False,
                              'independent_consent_verified': False}))
             if approval and approval.channel == 'chatgpt_policy':
                 if (not self.approval_policy.eligible(principal, item.payload, context)

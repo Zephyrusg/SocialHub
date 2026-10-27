@@ -78,3 +78,5 @@ Reverting to an older image is safe only while both global write switches remain
 off. Existing requests and owner grants remain in the database for audit; an
 excluded account cannot use them. Recheck effective runtime gates and both
 accounts' read capabilities after rollback.
+
+An operator-selected direct-instruction alternative is documented in [chat-first approvals](chat-first-approval.md). It uses separate test evidence and explicit risk acceptance; it must never assert that an unobserved native confirmation was verified.
