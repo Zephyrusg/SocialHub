@@ -1,5 +1,6 @@
 """Exact origins; forwarding headers have authority only at the configured proxy boundary."""
 import ipaddress
+import logging
 from urllib.parse import urlsplit
 from starlette.responses import PlainTextResponse
 
@@ -32,5 +33,9 @@ class OriginBoundary:
             if len(hosts) != 1 or hosts[0] not in self.hosts:
                 return await PlainTextResponse('Untrusted host', status_code=421)(scope, receive, send)
             if len(origins) > 1 or (origins and origins[0] not in self.origins):
+                reason = ('multiple_origins' if len(origins) > 1 else
+                          'null_origin' if origins[0] == 'null' else 'unexpected_origin')
+                logging.getLogger('socialhub').warning('origin_boundary_denied', extra={'safe_fields': {
+                    'reason': reason, 'surface': 'admin' if scope.get('path', '').startswith('/admin/') else 'other'}})
                 return await PlainTextResponse('Untrusted origin', status_code=403)(scope, receive, send)
         await self.app(scope, receive, send)

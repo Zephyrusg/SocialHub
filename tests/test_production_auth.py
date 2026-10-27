@@ -60,6 +60,16 @@ async def test_canonical_metadata_challenge_and_all_route_host_origin_boundary()
     assert (await c.get(path,headers={'Origin':'https://evil.test'})).status_code==403
    assert (await c.get('/media/example')).status_code==404
 
+@pytest.mark.parametrize('origin,reason', [('null','null_origin'),('https://private-origin.invalid','unexpected_origin')])
+async def test_origin_rejection_logs_only_fixed_categories(caplog,origin,reason):
+ app=create_server(settings(auth_mode='oauth')).streamable_http_app()
+ async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url=ORIGIN) as c:
+  r=await c.post('/admin/meta/settings',headers={'Origin':origin},data={'app_secret':'never-log-form-content'})
+ assert r.status_code==403 and r.text=='Untrusted origin'
+ events=[r for r in caplog.records if r.msg=='origin_boundary_denied']
+ assert events[-1].safe_fields=={'reason':reason,'surface':'admin'}
+ assert 'never-log-form-content' not in caplog.text and 'private-origin.invalid' not in caplog.text
+
 async def test_meta_and_admin_portal_links_use_configured_origin(sessions):
  s=settings(meta_app_id='12345',meta_app_secret='synthetic',approval_portal_enabled=True)
  assert MetaOAuth(s,sessions).issue_login().startswith(ORIGIN+'/meta/oauth/start?')
