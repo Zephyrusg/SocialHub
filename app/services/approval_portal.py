@@ -20,6 +20,10 @@ class OwnerPortal:
         if not self.settings.approval_portal_enabled:
             raise HubError('portal_disabled', 'The optional owner portal is disabled')
 
+    def create_session(self, subject):
+        ticket = self.issue_login(subject).split('ticket=', 1)[1]
+        return self.start(ticket)
+
     def issue_login(self, owner):
         """Administrative owner terminal only; never exposed as a tool or HTTP issuer."""
         self.enabled()

@@ -10,6 +10,8 @@ from app.core import HubError
 from app.database.models import Account, Capability, Credential, OAuthFlow, Audit, utcnow
 from app.security.tokens import TokenVault
 from app.services.meta_diagnostics import STAGE, diagnose, step
+from app.services.administration import effective_settings
+from app.database.models import SiteConfiguration
 
 
 def digest(value):
@@ -23,7 +25,7 @@ def expiration(*timestamps):
 
 class MetaOAuth:
     def __init__(self, settings, sessions, transport=None):
-        self.settings, self.sessions, self.transport = settings, sessions, transport
+        self.settings, self.sessions, self.transport = effective_settings(settings, sessions), sessions, transport
         self.vault = TokenVault([settings.encryption_key.get_secret_value()])
 
     def configured(self):
@@ -39,7 +41,7 @@ class MetaOAuth:
         ticket = secrets.token_urlsafe(32)
         with self.sessions.begin() as db:
             db.execute(delete(OAuthFlow).where(OAuthFlow.expires_at < utcnow()))
-            db.add(OAuthFlow(ticket_hash=digest(ticket), expires_at=utcnow() + timedelta(minutes=10)))
+            db.add(OAuthFlow(ticket_hash=digest(ticket), configuration_revision=self.settings._meta_configuration_revision, expires_at=utcnow() + timedelta(minutes=10)))
         return self.settings.browser_origin + '/meta/oauth/start?' + urlencode({'ticket': ticket})
 
     def start(self, ticket):
@@ -48,7 +50,7 @@ class MetaOAuth:
             raise HubError('invalid_oauth_flow', 'Invalid or expired local login link')
         state, browser = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         with self.sessions.begin() as db:
-            result = db.execute(update(OAuthFlow).where(OAuthFlow.ticket_hash == digest(ticket), OAuthFlow.started.is_(False), OAuthFlow.expires_at > utcnow()).values(started=True, state_hash=digest(state), browser_hash=digest(browser)))
+            result = db.execute(update(OAuthFlow).where(OAuthFlow.ticket_hash == digest(ticket), OAuthFlow.started.is_(False), OAuthFlow.configuration_revision == self.settings._meta_configuration_revision, OAuthFlow.expires_at > utcnow()).values(started=True, state_hash=digest(state), browser_hash=digest(browser)))
             if result.rowcount != 1:
                 raise HubError('invalid_oauth_flow', 'Login link expired or already used; issue a new local link')
         params = {'client_id': self.settings.meta_app_id, 'redirect_uri': self.settings.meta_redirect_uri,
@@ -59,7 +61,7 @@ class MetaOAuth:
         if not state or not browser or len(state) > 128 or len(browser) > 128:
             raise HubError('invalid_oauth_state', 'Missing browser-bound OAuth state; start a new local login')
         with self.sessions.begin() as db:
-            result = db.execute(update(OAuthFlow).where(OAuthFlow.state_hash == digest(state), OAuthFlow.browser_hash == digest(browser), OAuthFlow.started.is_(True), OAuthFlow.consumed.is_(False), OAuthFlow.expires_at > utcnow()).values(consumed=True))
+            result = db.execute(update(OAuthFlow).where(OAuthFlow.state_hash == digest(state), OAuthFlow.browser_hash == digest(browser), OAuthFlow.started.is_(True), OAuthFlow.consumed.is_(False), OAuthFlow.configuration_revision == self.settings._meta_configuration_revision, OAuthFlow.expires_at > utcnow()).values(consumed=True))
             if result.rowcount != 1:
                 raise HubError('invalid_oauth_state', 'OAuth state expired, mismatched or replayed; start a new login')
 
@@ -187,6 +189,9 @@ class MetaOAuth:
         expiry = expiration(exchange_expiry, user_debug.get('expires_at'), user_debug.get('data_access_expires_at'), page_debug.get('expires_at'), page_debug.get('data_access_expires_at'))
         STAGE.set('credential_storage')
         with self.sessions.begin() as db:
+            configuration = db.scalar(select(SiteConfiguration).where(SiteConfiguration.id == 'meta').with_for_update())
+            if (configuration.revision if configuration else 0) != self.settings._meta_configuration_revision:
+                raise HubError('configuration_conflict', 'Meta setup changed during login; start a fresh connection')
             # Authorization is for exactly these real accounts. Existing mocks remain for regression tests but are hidden in live mode.
             for platform, remote, name, account_type in [('facebook', PAGE_ID, verified_page.get('name', 'PixelPapa'), 'page'), ('instagram', INSTAGRAM_ID, ig['username'], kind)]:
                 aid = f'pixelpapa-{platform}'

@@ -6,10 +6,14 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from app.config import Settings
+from app.database import database
+from app.services.administration import effective_settings
 
 
 async def main():
     s = Settings()
+    _, sessions = database(s.database_url.get_secret_value())
+    s = effective_settings(s, sessions)
     url = os.environ.get('SMOKE_URL', s.public_url)
     headers = {'Authorization': 'Bearer ' + s.local_token.get_secret_value()}
     async with httpx.AsyncClient(timeout=10) as client:

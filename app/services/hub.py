@@ -11,6 +11,7 @@ from app.connectors.meta import GraphClient, FacebookConnector, InstagramConnect
 from app.connectors.meta_policy import PAGE_ID, INSTAGRAM_ID, capabilities
 from app.database.models import Credential
 from app.security.tokens import TokenVault
+from app.services.administration import EffectiveSettings, effective_settings
 from app.database.models import Account, Capability, Post, Job, Idempotency, Audit, Operation
 
 
@@ -18,9 +19,12 @@ class Hub:
     def __init__(self, sessions, settings=None):
         self.sessions = sessions
         self.settings = settings
-        self.live_reads = bool(settings and settings.meta_live_reads)
         self.vault = TokenVault([settings.encryption_key.get_secret_value()]) if settings else None
         self.connectors = {p: MockConnector(p) for p in ['facebook', 'instagram']}
+
+    @property
+    def live_reads(self):
+        return bool(self.settings and self.settings.meta_live_reads)
 
     def seed_mocks(self):
         with self.sessions.begin() as db:
@@ -51,6 +55,10 @@ class Hub:
         return account
 
     async def read(self, operation, account_id=None, **args):
+        if isinstance(self.settings, EffectiveSettings):
+            # Freeze setup once before acquiring an operation DB connection.
+            # Nested dynamic lookups could exhaust the small production pool.
+            return await Hub(self.sessions, effective_settings(self.settings, self.sessions)).read(operation, account_id, **args)
         with self.sessions() as db:
             if operation == 'get_system_status':
                 db.execute(text('SELECT 1'))
@@ -103,6 +111,8 @@ class Hub:
             db.add(Operation(account_id=account_id, operation=operation, status=outcome, error_code=code, retryable=retryable))
 
     def write(self, operation, account_id, payload, key, subject, scopes):
+        if isinstance(self.settings, EffectiveSettings):
+            return Hub(self.sessions, effective_settings(self.settings, self.sessions)).write(operation, account_id, payload, key, subject, scopes)
         # A scope is authorization to exercise a mock operation, not proof of user intent.
         # There is no live-write path or model-supplied approval flag.
         if 'socialhub:mock-write' not in scopes:

@@ -20,7 +20,8 @@ This is an evolving single-owner project. The current live-account allowlist is 
 - ChatGPT OAuth linking and MCP reads tested end to end against an isolated mock-data staging environment.
 - Exact publication previews, content/media hashes and persistent per-account operation states.
 - Publishing and supported edit/reply methods implemented behind feature flags and approval checks; coverage varies by operation and platform.
-- Separate owner approval through an optional lightweight portal, with an administrative CLI fallback.
+- Optional setup administration through your existing OIDC account, with separate admin/publisher permissions and encrypted Meta settings.
+- Separate owner approval through an optional lightweight portal, with an administrative CLI fallback; setup does not require that portal.
 - Private media ingestion, image validation and metadata-only video checks.
 - Automated tests for authentication, approval boundaries, account restrictions, replay protection and failure handling.
 
@@ -62,7 +63,7 @@ docker run --rm --no-healthcheck --tmpfs /tmp:size=64m,mode=1777 socialhub:test
 
 The Python tests use temporary databases and fake API transports; they do not require real Meta credentials or publish social content. Host-side video tests may skip when ffprobe is unavailable; the Docker test target includes it.
 
-Documentation: [development](docs/development.md), [deployment](docs/deployment.md), and [security boundaries](docs/security.md).
+Documentation: [development](docs/development.md), [deployment](docs/deployment.md), [setup administration](docs/administration.md), and [security boundaries](docs/security.md).
 
 ## Deployment direction
 

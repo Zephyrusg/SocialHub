@@ -31,3 +31,7 @@ Use a nonroot container, read-only filesystem, private data volume, explicit CPU
 The pre-release review covered the original locally available 14-commit history, tracked files, authentication/approval/media boundaries, an offline secret scan, static analysis and the locked Python dependencies. No confirmed real credential leak was found; 44 pinned Python packages had no known vulnerabilities reported by pip-audit on 27 October 2026. These are bounded observations, not a guarantee. Complete container OS/native-binary auditing and license review remain separate work.
 
 Never post a credential, private key, personal post record or full OAuth URL in a public issue. For a suspected leak, stop the affected exposure, use a private communication channel and rotate the affected credential through local administration.
+
+## Setup administration
+
+The optional `/admin/` UI uses an independent confidential OIDC client, recent password/TOTP MFA, hashed short-lived sessions and same-origin/CSRF-protected bounded forms. Exact bootstrap subjects govern admin and publisher permissions separately; OAuth-mode live publishing additionally requires the explicit publisher allowlist. Managed Meta settings are encrypted and revision-bound; changing credentials revokes connections/pending Meta flows and disables reads. The UI cannot grant roles, enable writes or approve posts. See [administration](administration.md).

@@ -16,6 +16,7 @@ from app.database import database
 from app.security.auth import Verifier
 from app.security.tokens import TokenVault
 from app.services.hub import Hub
+from app.services.administration import EffectiveSettings
 from app.services.publishing import PublishingService
 from app.models_publication import PublicationRequest
 from sqlalchemy import select
@@ -31,8 +32,9 @@ def create_server(settings=None):
     settings = settings or Settings()
     TokenVault([settings.encryption_key.get_secret_value()])  # Fail at startup on invalid keys.
     engine, sessions = database(settings.database_url.get_secret_value())
-    hub = Hub(sessions, settings)
-    publishing = PublishingService(settings, sessions)
+    active = EffectiveSettings(settings, sessions)
+    hub = Hub(sessions, active)
+    publishing = PublishingService(active, sessions)
     mcp = FastMCP('SocialHub', host='0.0.0.0', port=8000, stateless_http=True, json_response=False,
                   auth=AuthSettings(issuer_url=AnyHttpUrl(settings.oauth_issuer), resource_server_url=AnyHttpUrl(settings.public_url), required_scopes=['socialhub:read'], validate_token_resource=True),
                   token_verifier=Verifier(settings),
@@ -99,7 +101,7 @@ def create_server(settings=None):
             log.error('mcp_internal_error', extra={'safe_fields': {'operation': operation}})
             return {'ok': False, 'error': {'code': 'internal_error', 'message': 'Operation failed; inspect server health', 'retryable': False}}
 
-    read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=settings.meta_live_reads)
+    read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=settings.meta_live_reads or settings.admin_enabled)
     write = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 
     @mcp.tool(annotations=read, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read']}]})
@@ -132,22 +134,22 @@ def create_server(settings=None):
         """Return database health and mock/live mode."""
         return await invoke('get_system_status')
 
-    @mcp.tool(annotations=write, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish' if settings.meta_live_reads else 'socialhub:mock-write']}]})
+    @mcp.tool(annotations=write, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish' if settings.meta_live_reads or settings.admin_enabled else 'socialhub:mock-write']}]})
     async def publish_post(account_id: Short, text: Body, idempotency_key: Short) -> dict[str, Any]:
         """Prepare an immutable text preview for review in ChatGPT. Follow the reported approval requirements before execute_publication; respect native write confirmation. Mock accounts retain simulation behavior."""
         return await invoke('publish_post', account_id, payload={'text': text}, idempotency_key=idempotency_key)
 
-    @mcp.tool(annotations=write, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish' if settings.meta_live_reads else 'socialhub:mock-write']}]})
+    @mcp.tool(annotations=write, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish' if settings.meta_live_reads or settings.admin_enabled else 'socialhub:mock-write']}]})
     async def update_post(account_id: Short, post_id: Short, text: Body, idempotency_key: Short) -> dict[str, Any]:
         """Prepare a supported Facebook text/link edit for review in ChatGPT. Follow its approval requirements before execution. Instagram caption replacement is unsupported."""
         return await invoke('update_post', account_id, payload={'post_id': post_id, 'text': text}, idempotency_key=idempotency_key)
 
-    @mcp.tool(annotations=write, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish' if settings.meta_live_reads else 'socialhub:mock-write']}]})
+    @mcp.tool(annotations=write, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish' if settings.meta_live_reads or settings.admin_enabled else 'socialhub:mock-write']}]})
     async def reply_to_comment(account_id: Short, comment_id: Short, text: Body, idempotency_key: Short, post_id: Short | None = None) -> dict[str, Any]:
         """Prepare a reply to an owned comment for review in ChatGPT under the reported approval policy. Live replies require the parent post ID; mocks retain their existing behavior."""
         return await invoke('reply_to_comment', account_id, payload={'comment_id': comment_id, 'text': text, **({'post_id': post_id} if post_id else {})}, idempotency_key=idempotency_key)
 
-    @mcp.tool(annotations=write, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish' if settings.meta_live_reads else 'socialhub:mock-write']}]})
+    @mcp.tool(annotations=write, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish' if settings.meta_live_reads or settings.admin_enabled else 'socialhub:mock-write']}]})
     async def schedule_post(account_id: Short, text: Body, run_at: Annotated[str, Field(max_length=64)], timezone: Annotated[str, Field(max_length=64)], idempotency_key: Short) -> dict[str, Any]:
         """MOCK ONLY. Persist a requested schedule with explicit offset and IANA timezone; no worker publishes it."""
         return await invoke('schedule_post', account_id, payload={'text': text, 'run_at': run_at, 'timezone': timezone}, idempotency_key=idempotency_key)
@@ -238,7 +240,7 @@ def create_server(settings=None):
         try:
             with engine.connect() as db:
                 db.execute(text('SELECT 1'))
-                if db.execute(text('SELECT version_num FROM alembic_version')).scalar() != '0005':
+                if db.execute(text('SELECT version_num FROM alembic_version')).scalar() != '0006':
                     return JSONResponse({'status': 'schema_mismatch'}, status_code=503)
             return JSONResponse({'status': 'ready'})
         except Exception:
@@ -254,9 +256,11 @@ def create_server(settings=None):
     from app.security.media_routes import register_media_routes
     register_media_routes(mcp, settings, sessions)
     from app.security.meta_routes import register_meta_routes
-    register_meta_routes(mcp, settings, sessions)
+    register_meta_routes(mcp, active, sessions)
     from app.security.approval_routes import register_approval_routes
     register_approval_routes(mcp, settings, sessions)
+    from app.security.admin_routes import register_admin_routes
+    register_admin_routes(mcp, settings, sessions)
     return mcp
 
 

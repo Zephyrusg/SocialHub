@@ -122,6 +122,7 @@ class OAuthFlow(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     started: Mapped[bool] = mapped_column(Boolean, default=False)
     consumed: Mapped[bool] = mapped_column(Boolean, default=False)
+    configuration_revision: Mapped[int | None] = mapped_column(Integer)
 
 
 class Publication(Base):
@@ -191,3 +192,19 @@ class OwnerOIDCFlow(Base):
     ciphertext: Mapped[str] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     consumed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AdminSession(Base):
+    __tablename__ = 'admin_sessions'
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    subject: Mapped[str] = mapped_column(String(128))
+    policy_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+
+
+class SiteConfiguration(Base):
+    __tablename__ = 'site_configuration'
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    ciphertext: Mapped[str | None] = mapped_column(Text)

@@ -4,12 +4,16 @@ import json
 from app.config import Settings
 from app.core import configure_logging, HubError
 from app.connectors.meta import GraphClient
+from app.database import database
+from app.services.administration import effective_settings
 
 
 async def main():
     configure_logging()
     s = Settings()
     try:
+        _, sessions = database(s.database_url.get_secret_value())
+        s = effective_settings(s, sessions)
         if not s.meta_app_id or not s.meta_app_secret.get_secret_value():
             raise HubError('meta_not_configured', 'Complete local configuration first')
         exchange = GraphClient('', s.meta_graph_version)

@@ -1,0 +1,46 @@
+# Disposable WSL-only synthetic identity lab. No SSH, production endpoints or Meta credentials.
+name: socialhub-admin-lab
+services:
+  authelia:
+    image: authelia/authelia:4.39.28@sha256:bd97cff4fcbf715b5ff1f9ae286afbe6033afce385302520b0368122d43a6f54
+    user: '1000:1000'
+    entrypoint: [authelia]
+    command: [--config, /config/configuration.yml]
+    volumes: [../../secrets/admin-lab:/config]
+    networks: [lab]
+    logging: {driver: none}
+  socialhub:
+    image: socialhub:admin-dev
+    env_file: ../../secrets/admin-lab/socialhub.env
+    user: '10001:10001'
+    volumes:
+      - lab-data:/data
+      - ../../secrets/admin-lab/ca.crt:/local-ca/ca.crt:ro
+    read_only: true
+    tmpfs: ['/tmp:size=32m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 128
+    networks: [lab]
+    logging: {driver: none}
+  proxy:
+    image: nginx:stable
+    ports: ['127.0.0.1:9453:9453', '127.0.0.1:9454:9454']
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../../secrets/admin-lab/ca.crt:/local-ca/ca.crt:ro
+      - ../../secrets/admin-lab/tls.key:/local-ca/tls.key:ro
+    networks:
+      lab:
+        ipv4_address: 172.30.85.10
+        aliases: [auth.socialhub.test, hub.socialhub.test]
+    depends_on: [authelia,socialhub]
+    logging: {driver: none}
+networks:
+  lab:
+    ipam:
+      config: [{subnet: 172.30.85.0/24}]
+volumes:
+  lab-data:

@@ -21,7 +21,7 @@ def native_settings(service, **changes):
         'oauth_audience': 'https://hub.example/mcp', 'oauth_allowed_subjects': ['alice'], 'oauth_allowed_client_ids': ['chatgpt-client'], 'approval_mode': 'chatgpt_native',
         'chatgpt_confirmation_tested': True, 'chatgpt_confirmation_evidence_sha256': 'e' * 64,
         'chatgpt_residual_risk_accepted': True, 'chatgpt_allowed_client_ids': ['chatgpt-client'],
-        'chatgpt_allowed_principals': ['alice']}
+        'chatgpt_allowed_principals': ['alice'], 'publishing_allowed_subjects': ['alice']}
     return Settings.model_validate(data | changes)
 
 

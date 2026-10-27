@@ -83,8 +83,8 @@ async def test_authelia_scp_normalization_is_strict(monkeypatch,scope,scp,valid)
  if scope is not None:claims['scope']=scope
  assert bool(await v.verify_token(jwt.encode(claims,key,algorithm='RS256',headers={'typ':'at+jwt'})))==valid
 
-async def test_existing_local_tls_proxy_boundary_keeps_native_callback():
- s=Settings(_env_file=None,database_url='sqlite://',encryption_key=Fernet.generate_key().decode(),
+async def test_existing_local_tls_proxy_boundary_keeps_native_callback(sessions):
+ s=Settings(_env_file=None,database_url=str(sessions.kw['bind'].url),encryption_key=Fernet.generate_key().decode(),
   local_token='a'*64,trusted_proxy_cidrs=['172.21.0.3/32'])
  app=create_server(s).streamable_http_app()
  for peer in ['172.21.0.3','192.0.2.10']:

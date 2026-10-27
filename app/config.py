@@ -1,6 +1,6 @@
 from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import SecretStr, model_validator
+from pydantic import SecretStr, PrivateAttr, model_validator
 from urllib.parse import urlsplit
 import ipaddress
 
@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     owner_oidc_client_secret: SecretStr = SecretStr('')
     owner_oidc_allowed_subjects: list[str] = []
     owner_oidc_require_mfa: bool = True
+    admin_enabled: bool = False
+    admin_oidc_client_id: str = ''
+    admin_oidc_client_secret: SecretStr = SecretStr('')
+    admin_allowed_subjects: list[str] = []
+    publishing_allowed_subjects: list[str] = []
+    _meta_configuration_revision: int | None = PrivateAttr(default=None)
     media_delivery_enabled: bool = True
     media_root: str = '/data/media'
 
@@ -67,13 +73,22 @@ class Settings(BaseSettings):
         if self.owner_oidc_enabled and not (self.approval_portal_enabled and self.owner_oidc_client_id
                 and self.owner_oidc_client_secret.get_secret_value() and self.owner_oidc_allowed_subjects):
             raise ValueError('Owner OIDC requires a separate confidential client and exact owner subjects')
+        if self.admin_enabled and not (self.admin_oidc_client_id and self.admin_oidc_client_secret.get_secret_value()
+                and self.admin_allowed_subjects):
+            raise ValueError('Administration requires its own confidential OIDC client and exact admin subjects')
+        if self.admin_enabled and (self.admin_oidc_client_id in self.oauth_allowed_client_ids
+                or self.admin_oidc_client_id == self.owner_oidc_client_id):
+            raise ValueError('The administration client must be separate from MCP and approval clients')
+        for subject in self.admin_allowed_subjects + self.publishing_allowed_subjects:
+            if not isinstance(subject, str) or not 1 <= len(subject) <= 128 or subject != subject.strip():
+                raise ValueError('Roles require bounded exact stable subjects')
         if self.auth_mode not in {'local', 'oauth'}:
             raise ValueError('auth_mode must be local or oauth')
         if self.auth_mode == 'local' and len(self.local_token.get_secret_value()) < 32:
             raise ValueError('A random local token of at least 32 characters is required')
         if self.auth_mode == 'oauth' and not (self.oauth_jwks_url.startswith('https://') and self.oauth_issuer.startswith('https://') and self.public_url.startswith('https://')):
             raise ValueError('OAuth requires HTTPS issuer, public URL and JWKS URL')
-        if self.auth_mode == 'oauth' or self.owner_oidc_enabled:
+        if self.auth_mode == 'oauth' or self.owner_oidc_enabled or self.admin_enabled:
             validate_url(self.oauth_issuer)
             validate_url(self.oauth_jwks_url)
         if self.auth_mode == 'oauth' and self.oauth_audience != self.public_url:

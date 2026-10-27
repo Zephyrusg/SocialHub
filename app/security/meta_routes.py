@@ -10,7 +10,8 @@ COOKIE = '__Secure-socialhub-meta'
 
 
 def register_meta_routes(mcp, settings, sessions):
-    service = MetaOAuth(settings, sessions)
+    def service():
+        return MetaOAuth(settings, sessions)
 
     def trusted_https(request):
         # This header is overwritten, never passed through, by the dedicated loopback TLS vhost.
@@ -23,7 +24,7 @@ def register_meta_routes(mcp, settings, sessions):
         try:
             if len(request.query_params.getlist('ticket')) != 1:
                 raise HubError('invalid_oauth_flow', 'One login ticket is required')
-            url, browser = service.start(request.query_params.get('ticket'))
+            url, browser = service().start(request.query_params.get('ticket'))
             response = RedirectResponse(url, status_code=303, headers=HEADERS)
             response.set_cookie(COOKIE, browser, max_age=600, path='/meta/oauth', secure=True, httponly=True, samesite='lax')
             return response
@@ -37,7 +38,7 @@ def register_meta_routes(mcp, settings, sessions):
         try:
             if len(request.query_params.getlist('state')) != 1 or len(request.query_params.getlist('code')) > 1:
                 raise HubError('invalid_oauth_state', 'Invalid callback parameters')
-            result = await service.complete(request.query_params.get('state'), request.cookies.get(COOKIE),
+            result = await service().complete(request.query_params.get('state'), request.cookies.get(COOKIE),
                 request.query_params.get('code'), denied='error' in request.query_params)
             response = HTMLResponse('PixelPapa Facebook and Instagram accounts verified and connected. Live writes remain disabled. You may close this window.', headers=HEADERS)
         except HubError as error:

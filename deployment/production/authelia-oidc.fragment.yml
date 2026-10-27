@@ -18,7 +18,8 @@ identity_providers:
     clients:
       - client_id: OWNER_CHOSEN_MCP_CLIENT_ID
         client_name: SocialHub MCP read-only
-        public: true
+        public: false
+        client_secret: OWNER_PROVIDED_HASHED_MCP_SECRET
         authorization_policy: two_factor
         redirect_uris: [COPY_EXACT_CALLBACK_FROM_CHATGPT_MANAGEMENT_UI]
         scopes: [openid, 'socialhub:read']
@@ -26,16 +27,16 @@ identity_providers:
         requested_audience_mode: explicit
         grant_types: [authorization_code]
         response_types: [code]
-        token_endpoint_auth_method: none
+        token_endpoint_auth_method: client_secret_basic
         require_pkce: true
         pkce_challenge_method: S256
         access_token_signed_response_alg: RS256
-      - client_id: OWNER_CHOSEN_PORTAL_CLIENT_ID
-        client_name: SocialHub independent owner
+      - client_id: OWNER_CHOSEN_ADMIN_CLIENT_ID
+        client_name: SocialHub setup administration
         public: false
         client_secret: OWNER_PROVIDED_HASHED_CLIENT_SECRET
         authorization_policy: two_factor
-        redirect_uris: ['https://socialhub.example.test/approval/oidc/callback']
+        redirect_uris: ['https://socialhub.example.test/admin/oidc/callback']
         scopes: [openid]
         grant_types: [authorization_code]
         response_types: [code]

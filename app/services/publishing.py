@@ -14,6 +14,7 @@ from app.connectors.meta import GraphClient, FacebookConnector, InstagramConnect
 from app.connectors.meta_policy import capabilities
 from app.connectors.publishing import MetaPublishingConnector
 from app.services.approval_policy import ApprovalPolicy
+from app.services.administration import require_publisher, effective_settings
 
 
 def content_hash(payload):
@@ -29,25 +30,27 @@ class PublishingService:
 
     def context(self, account_id, execute=False):
         from app.services.hub import Hub
+        active = effective_settings(self.settings, self.sessions)
         with self.sessions() as db:
-            account = Hub(self.sessions, self.settings).account(db, account_id)
+            account = Hub(self.sessions, active).account(db, account_id)
             if account.is_mock:
                 raise HubError('account_denied', 'The durable publisher requires explicitly connected real-account identities')
             credential = db.scalar(select(Credential).where(Credential.account_id == account_id))
             if not credential:
                 raise HubError('meta_not_connected', 'Connect and verify the account before preparing content')
-            token = TokenVault([self.settings.encryption_key.get_secret_value()]).decrypt(credential)
+            token = TokenVault([active.encryption_key.get_secret_value()]).decrypt(credential)
             caps = capabilities(account.platform, credential.scopes, token.get('tasks', []), account.account_type)
             if self.connector_factory:
                 adapter = self.connector_factory(account, execute)
             else:
-                graph = GraphClient(token['access_token'], self.settings.meta_graph_version,
-                    app_secret=self.settings.meta_app_secret.get_secret_value(), allow_writes=execute and self.settings.meta_live_writes and self.settings.publishing_enabled)
+                graph = GraphClient(token['access_token'], active.meta_graph_version,
+                    app_secret=active.meta_app_secret.get_secret_value(), allow_writes=execute and self.settings.meta_live_writes and self.settings.publishing_enabled)
                 connector = (FacebookConnector if account.platform == 'facebook' else InstagramConnector)(graph, account.remote_id)
                 adapter = MetaPublishingConnector(connector)
             return account, caps, adapter
 
     async def prepare(self, principal, idempotency_key, request):
+        require_publisher(self.settings, principal)
         if not principal or len(principal) > 128 or not 1 <= len(idempotency_key) <= 128:
             raise HubError('invalid_request', 'Principal and bounded idempotency key are required')
         if not isinstance(request, PublicationRequest):
@@ -239,6 +242,7 @@ class PublishingService:
             raise HubError('live_writes_disabled', 'Live publishing remains disabled; preparing a preview does not authorize public writes')
         if 'socialhub:publish' not in scopes:
             raise HubError('insufficient_scope', 'The authenticated caller requires socialhub:publish')
+        require_publisher(self.settings, principal)
         current = self.review(publication_id, principal)
         for target in current['targets']:
             claim = self.claim(publication_id, target['target_id'], principal, context)

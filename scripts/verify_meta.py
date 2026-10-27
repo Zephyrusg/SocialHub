@@ -6,6 +6,7 @@ from app.core import HubError, configure_logging
 from app.database import database
 from app.services.hub import Hub
 from app.services.meta_oauth import MetaOAuth
+from app.services.administration import effective_settings
 from app.connectors.meta_policy import PAGE_ID, INSTAGRAM_ID
 from app.services.meta_diagnostics import latest_failure
 
@@ -14,6 +15,7 @@ async def main():
     configure_logging()
     settings = Settings()
     _, sessions = database(settings.database_url.get_secret_value())
+    settings = effective_settings(settings, sessions)
     oauth = MetaOAuth(settings, sessions)
     results = {'graph_version': settings.meta_graph_version, 'writes_performed': 0}
     try:
