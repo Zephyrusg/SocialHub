@@ -66,7 +66,7 @@ class AdminSessions:
     def policy(self):
         s = self.settings
         return hashlib.sha256(json.dumps([s.oauth_issuer, s.admin_oidc_client_id,
-            sorted(s.admin_allowed_subjects), 'pwd+otp', s.browser_origin], separators=(',', ':')).encode()).hexdigest()
+            sorted(s.admin_allowed_subjects), 'password-totp-or-passkey-v2', s.browser_origin], separators=(',', ':')).encode()).hexdigest()
 
     def create_session(self, subject):
         self.enabled()
@@ -111,7 +111,7 @@ class AdminOIDC(BrowserOIDC):
         super().__init__(settings, sessions, client_id=settings.admin_oidc_client_id,
             client_secret=settings.admin_oidc_client_secret, allowed_subjects=settings.admin_allowed_subjects,
             callback_path='/admin/oidc/callback', purpose='admin', session_backend=AdminSessions(settings, sessions),
-            enabled=settings.admin_enabled, require_mfa=True, max_age=900, transport=transport)
+            enabled=settings.admin_enabled, require_mfa=True, max_age=900, allow_passkey_mfa=True, transport=transport)
 
 
 class Administration:

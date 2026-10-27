@@ -78,6 +78,34 @@ async def test_admin_oidc_claims_fail_closed(admin_oidc, sessions, change):
     with sessions() as db:assert db.scalar(select(AdminSession)) is None
 
 
+@pytest.mark.parametrize('methods', [
+    ['pwd', 'pop', 'hwk', 'user', 'mfa'],
+    ['pwd', 'pop', 'swk', 'user', 'pin', 'mfa'],
+    ['pwd', 'pop', 'user', 'mfa'],
+])
+async def test_admin_password_plus_passkey_mfa(admin_oidc, methods):
+    service, state, query, browser = admin_oidc
+    state['change'] = {'amr': methods}
+    token = await service.complete(callback(service, query), browser)
+    assert service.portal.authenticate(token) == 'owner-sub'
+
+
+@pytest.mark.parametrize('methods', [
+    ['pwd'], ['pop', 'hwk', 'user', 'pin', 'mfa'], ['pwd', 'mfa'],
+    ['pwd', 'pop', 'user'], ['pwd', 'hwk', 'mfa'], ['pwd', 'sms', 'mfa'],
+    'pwd otp', {'pwd': True, 'otp': True}, None, 1, ['pwd', ['otp']],
+    ['pwd', 'otp', None], ['pwd', 'otp'] + ['x'] * 15,
+])
+async def test_admin_unproven_or_malformed_mfa_denied(admin_oidc, sessions, caplog, methods):
+    service, state, query, browser = admin_oidc
+    state['change'] = {'amr': methods}
+    with pytest.raises(HubError):await service.complete(callback(service, query), browser)
+    with sessions() as db:assert db.scalar(select(AdminSession)) is None
+    records = [r for r in caplog.records if r.msg == 'browser_oidc_denied']
+    assert records[-1].safe_fields == {'purpose': 'admin', 'reason': 'unsupported_mfa'}
+    assert state['nonce'] not in caplog.text and browser not in caplog.text
+
+
 async def test_admin_oidc_cookie_and_client_purpose_binding(admin_oidc, sessions):
     from app.database.models import OwnerOIDCFlow
     service, state, query, browser = admin_oidc

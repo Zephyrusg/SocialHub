@@ -4,6 +4,7 @@ import base64
 from datetime import timedelta
 import hashlib
 import json
+import logging
 import secrets
 import time
 from urllib.parse import urlencode, urlsplit
@@ -21,14 +22,30 @@ class BrowserOIDC:
     """Shared verified browser login; each consumer has separate cookies/sessions/purpose."""
     def __init__(self, settings, sessions, *, client_id, client_secret, allowed_subjects,
                  callback_path, purpose, session_backend, enabled, require_mfa=True,
-                 max_age=None, transport=None):
+                 max_age=None, allow_passkey_mfa=False, transport=None):
         self.settings, self.sessions, self.transport = settings, sessions, transport
         self.client_id, self.client_secret = client_id, client_secret
         self.allowed_subjects, self.callback_path = allowed_subjects, callback_path
         self.purpose, self.portal, self.active = purpose, session_backend, enabled
         self.require_mfa, self.max_age = require_mfa, max_age
+        self.allow_passkey_mfa = allow_passkey_mfa
         self.vault = TokenVault([settings.encryption_key.get_secret_value()])
         self.keys = jwt.PyJWKClient(settings.oauth_jwks_url, lifespan=300, timeout=5) if enabled else None
+
+    def mfa_verified(self, value):
+        # Interpret only the trusted issuer's signed, bounded RFC8176 array.
+        if (not isinstance(value, list) or not 1 <= len(value) <= 16
+                or any(not isinstance(v, str) or not v or len(v) > 64 for v in value)):
+            return False
+        methods = set(value)
+        return {'pwd', 'otp'} <= methods or (self.allow_passkey_mfa
+            and {'pwd', 'pop', 'mfa'} <= methods)
+
+    def deny(self, reason, message):
+        # Never log tokens, claim values, callbacks, cookies or provider exceptions.
+        logging.getLogger('socialhub').warning('browser_oidc_denied', extra={'safe_fields': {
+            'purpose': 'admin' if self.purpose == 'admin' else 'approval', 'reason': reason}})
+        raise HubError('portal_denied', message)
 
     def enabled(self):
         self.portal.enabled()
@@ -111,12 +128,13 @@ class BrowserOIDC:
         if (not isinstance(claims['sub'], str) or claims['sub'] not in self.allowed_subjects
                 or not isinstance(claims['nonce'], str) or not secrets.compare_digest(claims['nonce'], stored['nonce'])
                 or claims.get('azp', self.client_id) != self.client_id
-                or (isinstance(claims['aud'], list) and len(claims['aud']) > 1 and 'azp' not in claims)
-                or (self.require_mfa and not {'pwd', 'otp'}.issubset(set(claims.get('amr', []))))):
-            raise HubError('portal_denied', 'Independent owner identity or MFA verification failed')
+                or (isinstance(claims['aud'], list) and len(claims['aud']) > 1 and 'azp' not in claims)):
+            self.deny('identity_or_nonce', 'Independent owner identity verification failed')
+        if self.require_mfa and not self.mfa_verified(claims.get('amr')):
+            self.deny('unsupported_mfa', 'Independent owner MFA verification failed')
         if self.max_age is not None:
             auth_time = claims.get('auth_time')
             if (not isinstance(auth_time, (int, float)) or isinstance(auth_time, bool)
                     or not time.time() - self.max_age <= auth_time <= time.time() + 5):
-                raise HubError('portal_denied', 'Recent authenticated owner login required')
+                self.deny('authentication_age', 'Recent authenticated owner login required')
         return await asyncio.to_thread(self.portal.create_session, claims['sub'])

@@ -38,3 +38,9 @@ The staged source was checked for private operational paths, infrastructure iden
 Administration remains disabled by default. Production still requires approved identity-provider client registration, exact verified subject bindings, proxy/privacy validation, database migration and native hardware acceptance. Existing owner-required per-operation approval remains enforced. Actual ChatGPT write-confirmation behavior and longer-lived MCP refresh sessions require their separate acceptance tests before enabling production publishing.
 
 See [administration setup and rollback](administration.md) for the deployment inputs and limitations. Deployment and activation are separate from this local implementation.
+
+## Password-plus-passkey compatibility follow-up
+
+The original admin validator accepted only password/TOTP AMR values, which rejected a valid password followed by WebAuthn/passkey login after consent. Administration now also accepts the trusted issuer's signed `pwd`, `pop`, `mfa` combination. This follows the [Authelia reference](https://www.authelia.com/reference/guides/authentication-method-references/) and [4.39.28 implementation](https://github.com/authelia/authelia/blob/v4.39.28/internal/authorization/amr.go). Password-only, passkey-only, incomplete and malformed MFA claims remain rejected; the optional approval portal retains its original MFA policy. Existing admin sessions are invalidated by the updated policy fingerprint.
+
+The full suite passed **271 tests** in 9.00 seconds, with the same three Alembic deprecation warnings. New signed-token cases cover hardware/software passkey variants, invalid factor combinations and claim types, session denial and credential-free rejection diagnostics. Production user acceptance requires a fresh login; a consumed OAuth code cannot be retried. No dependency or media binary changed.

@@ -84,3 +84,8 @@ async def test_expired_flow_and_provider_metadata(oidc,sessions):
                   {'code_challenge_methods_supported':['plain']},{'token_endpoint':'https://evil.test/token'}]:
   state['metadata']=metadata
   with pytest.raises(ValueError):await service.start()
+
+async def test_admin_passkey_extension_does_not_change_approval_policy(oidc):
+ service,state,query,browser=oidc
+ state['change']={'amr':['pwd','pop','hwk','user','mfa']}
+ with pytest.raises(HubError):await service.complete(params(service,query),browser)
