@@ -1,0 +1,10 @@
+-- Review only; requires verified protected backup + isolated restore BEFORE execution.
+-- Confirm candidate app .10 and one-off migrator .11 remain free.
+CREATE DATABASE socialhub CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'socialhub_app'@'172.28.50.10' IDENTIFIED BY 'OWNER_GENERATED_RUNTIME_SECRET';
+CREATE USER 'socialhub_migrate'@'172.28.50.11' IDENTIFIED BY 'DISTINCT_OWNER_GENERATED_MIGRATION_SECRET';
+GRANT SELECT, INSERT, UPDATE, DELETE ON socialhub.* TO 'socialhub_app'@'172.28.50.10';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES
+ ON socialhub.* TO 'socialhub_migrate'@'172.28.50.11';
+-- Runtime env NEVER receives migration/root credentials. No shared DB restart.
+-- One-off migrator runs on socialhub_backend at .11; alembic upgrade head => 0005.

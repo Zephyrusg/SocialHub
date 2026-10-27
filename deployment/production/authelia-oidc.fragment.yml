@@ -1,0 +1,44 @@
+# MERGE/DIFF FRAGMENT, NOT A REPLACEMENT production Authelia configuration.
+# Requires the locally tested 4.39.28 fix; 4.39.22 rejects resource at token exchange. Keep every existing user/session/storage/SSO policy.
+# Keys/secrets supplied through protected Authelia secret/config filters, not Git.
+identity_providers:
+  oidc:
+    hmac_secret: OWNER_PROVIDED_RANDOM_SECRET
+    jwks:
+      - key_id: OWNER_ASSIGNED_KEY_ID
+        algorithm: RS256
+        use: sig
+        key: OWNER_PROVIDED_PRIVATE_SIGNING_KEY
+    lifespans:
+      access_token: 5m
+      authorize_code: 1m
+      id_token: 5m
+    scopes:
+      'socialhub:read': {claims: []}
+    clients:
+      - client_id: OWNER_CHOSEN_MCP_CLIENT_ID
+        client_name: SocialHub MCP read-only
+        public: true
+        authorization_policy: two_factor
+        redirect_uris: [COPY_EXACT_CALLBACK_FROM_CHATGPT_MANAGEMENT_UI]
+        scopes: [openid, 'socialhub:read']
+        audience: ['https://socialhub.example.test/mcp']
+        requested_audience_mode: explicit
+        grant_types: [authorization_code]
+        response_types: [code]
+        token_endpoint_auth_method: none
+        require_pkce: true
+        pkce_challenge_method: S256
+        access_token_signed_response_alg: RS256
+      - client_id: OWNER_CHOSEN_PORTAL_CLIENT_ID
+        client_name: SocialHub independent owner
+        public: false
+        client_secret: OWNER_PROVIDED_HASHED_CLIENT_SECRET
+        authorization_policy: two_factor
+        redirect_uris: ['https://socialhub.example.test/approval/oidc/callback']
+        scopes: [openid]
+        grant_types: [authorization_code]
+        response_types: [code]
+        token_endpoint_auth_method: client_secret_basic
+        require_pkce: true
+        pkce_challenge_method: S256

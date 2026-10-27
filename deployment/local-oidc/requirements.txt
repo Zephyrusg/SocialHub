@@ -1,0 +1,6 @@
+# Browser/config tooling is local-test only; never added to runtime dependencies.
+playwright==1.56.0
+PyYAML==6.0.3
+httpx==0.28.1
+PyJWT[crypto]==2.15.1
+cryptography==50.0.2

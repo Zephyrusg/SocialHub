@@ -1,0 +1,56 @@
+name: socialhub
+services:
+  socialhub:
+    build: .
+    image: socialhub:phase2d
+    env_file:
+      - path: .env
+        required: true
+      - path: ./secrets/meta.env
+        required: false
+    environment:
+      TRUSTED_PROXY_CIDRS: '["${SOCIALHUB_LOCAL_PROXY_IP:-172.21.0.3}/32"]'
+    restart: unless-stopped
+    init: true
+    mem_limit: 384m
+    cpus: 1.0
+    pids_limit: 128
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - media:/data/media
+    networks: [local]
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+  nginx:
+    image: nginx:stable
+    restart: unless-stopped
+    ports: ['127.0.0.1:8787:8080', '127.0.0.1:8788:8443']
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./secrets/tls/localhost.crt:/etc/nginx/socialhub-tls/localhost.crt:ro
+      - ./secrets/tls/localhost.key:/etc/nginx/socialhub-tls/localhost.key:ro
+    depends_on:
+      socialhub:
+        condition: service_healthy
+    networks:
+      local:
+        ipv4_address: ${SOCIALHUB_LOCAL_PROXY_IP:-172.21.0.3}
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:8080/readyz >/dev/null || exit 1']
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+networks:
+  local:
+    name: socialhub_local
+    external: true
+volumes:
+  media:

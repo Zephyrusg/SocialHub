@@ -1,0 +1,44 @@
+name: socialhub-oidc-test
+services:
+  authelia:
+    user: "1000:1000"
+    entrypoint: [authelia]
+    command: [--config, /config/configuration.yml]
+    image: ${AUTHELIA_TEST_IMAGE:-authelia/authelia:4.39.28@sha256:bd97cff4fcbf715b5ff1f9ae286afbe6033afce385302520b0368122d43a6f54}
+    volumes: [../../secrets/local-oidc:/config]
+    networks: [test]
+    logging: {driver: none}
+  proxy:
+    image: nginx:stable
+    ports: ['127.0.0.1:9443:9443', '127.0.0.1:9444:9444']
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../../secrets/local-oidc/ca.crt:/local-ca/ca.crt:ro
+      - ../../secrets/local-oidc/tls.key:/local-ca/tls.key:ro
+    networks:
+      test:
+        ipv4_address: 172.30.83.10
+        aliases: [auth.socialhub.test, hub.socialhub.test]
+    depends_on: [authelia, socialhub]
+    logging: {driver: none}
+  socialhub:
+    image: socialhub:phase3a1
+    env_file: ../../secrets/local-oidc/socialhub.env
+    user: '10001:10001'
+    volumes:
+      - test-data:/data
+      - ../../secrets/local-oidc/ca.crt:/local-ca/ca.crt:ro
+    networks: [test]
+    read_only: true
+    tmpfs: ['/tmp:size=32m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    cpus: 0.5
+    logging: {driver: none}
+networks:
+  test:
+    ipam:
+      config: [{subnet: 172.30.83.0/24}]
+volumes:
+  test-data:

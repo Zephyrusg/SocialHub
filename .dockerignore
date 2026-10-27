@@ -1,0 +1,32 @@
+.git
+.env
+.env.*
+secrets
+data
+__pycache__
+.pytest_cache
+*.egg-info
+.tools
+.venv
+
+# Local operational records, never publish or send in a Docker build.
+private/
+
+# Exclude local private compatibility links from build contexts.
+.env
+.tools
+.venv
+secrets
+data
+deployment/staging
+scripts/activate_staging_site.py
+scripts/check_staging_lan.py
+scripts/configure_staging_callback.py
+scripts/prepare_phase2c.py
+scripts/prepare_staging.py
+scripts/provision_local.py
+scripts/staging_credentials.py
+scripts/staging_enroll.py
+scripts/staging_*.py
+scripts/verify_phase2d.py
+scripts/verify_staging.py

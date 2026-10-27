@@ -1,0 +1,24 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "socialhub": {
+      "type": "streamable-http",
+      "url": "https://socialhub.example.test/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "provided",
+              "clientId": "OWNER_REGISTERED_MCP_CLIENT_ID",
+              "tokenEndpointAuthMethod": "none"
+            },
+            "authorizationUrl": "COPY_EXACT_DISCOVERY_AUTHORIZATION_ENDPOINT",
+            "tokenUrl": "COPY_EXACT_DISCOVERY_TOKEN_ENDPOINT",
+            "baseScopes": ["openid", "socialhub:read"]
+          }
+        }
+      }
+    }
+  }
+}

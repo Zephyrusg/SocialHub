@@ -1,0 +1,52 @@
+# REVIEW TEMPLATE ONLY. No production execution is authorized by this file.
+name: socialhub
+services:
+  socialhub:
+    image: ${SOCIALHUB_IMAGE:?Set an approved registry/image@sha256 digest}
+    platform: linux/arm64
+    env_file: ./secrets/runtime.env
+    environment:
+      AUTH_MODE: oauth
+      PUBLIC_URL: https://socialhub.example.test/mcp
+      OAUTH_AUDIENCE: https://socialhub.example.test/mcp
+      BROWSER_ORIGIN: https://socialhub.example.test
+      META_REDIRECT_URI: https://socialhub.example.test/meta/oauth/callback
+      APPROVAL_MODE: owner_required
+      META_LIVE_WRITES: 'false'
+      PUBLISHING_ENABLED: 'false'
+      CHATGPT_CONFIRMATION_TESTED: 'false'
+      CHATGPT_RESIDUAL_RISK_ACCEPTED: 'false'
+      APPROVAL_PORTAL_ENABLED: 'false'
+      OWNER_OIDC_ENABLED: 'false'
+      MEDIA_DELIVERY_ENABLED: 'false'
+      MEDIA_PUBLIC_BASE_URL: ''
+      MEDIA_ROOT: /data/media
+    user: '10001:10001'
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ['/tmp:size=32m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    mem_reservation: 128m
+    cpus: 0.5
+    pids_limit: 128
+    volumes:
+      - ./data/media:/data/media
+    networks:
+      frontend: {}
+      backend:
+        ipv4_address: ${SOCIALHUB_BACKEND_IP:-172.28.50.10}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz',timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+networks:
+  frontend: {name: socialhub_frontend, external: true}
+  backend: {name: socialhub_backend, external: true}
