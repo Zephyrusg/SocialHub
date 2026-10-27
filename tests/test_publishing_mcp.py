@@ -136,6 +136,8 @@ async def test_chatgpt_policy_uses_signed_client_identity_through_real_mcp(tmp_p
             client.headers['Authorization']='Bearer '+bearer('real-client')
             required=(await call('get_approval_requirements',{'publication_id':p['publication_id']}))['data']
             assert not required['independent_owner_required'] and required['native_confirmation_receipt_verified'] is False
+            preview=(await call('get_publication_preview',{'publication_id':p['publication_id']}))['data']
+            assert not preview['requires_owner_approval'] and not preview['independent_owner_approval']
             assert (await call('execute_publication',{'publication_id':p['publication_id']}))['data']['state']=='in_progress'
             result=(await call('execute_publication',{'publication_id':p['publication_id']}))['data']
             assert result['state']=='succeeded' and result['approval_channel']=='chatgpt_policy'

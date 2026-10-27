@@ -171,6 +171,9 @@ def create_server(settings=None):
                 value = publishing.review(arguments['publication_id'], token.client_id)
             if action != 'requirements':
                 value['approval'] = publishing.approval_requirements(value['publication_id'], token.client_id, token)
+                # Report the actual authenticated caller's policy, rather than
+                # equating absence of a stored owner grant with a new CLI step.
+                value['requires_owner_approval'] = value['approval']['needs_new_owner_grant']
             return {'ok': True, 'data': value}
         except HubError as error:
             if token:
