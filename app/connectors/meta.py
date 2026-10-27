@@ -177,8 +177,45 @@ class MetaConnector:
 
 class FacebookConnector(MetaConnector):
     platform = 'facebook'
-    post_fields = 'id,message,created_time,permalink_url'
+    attachment_fields = 'description,title,type,url,media,target'
+    post_fields = ('id,message,story,created_time,permalink_url,full_picture,'
+                   f'attachments{{{attachment_fields},subattachments{{{attachment_fields}}}}}')
     posts_edge = 'posts'
+
+    @staticmethod
+    def post_content(item):
+        post = dict(item)
+        # Missing message is normal for media/system posts. Never invent a
+        # caption from a generated story or attachment title.
+        for field in ('message', 'story', 'full_picture'):
+            post.setdefault(field, None)
+        post['attachments'] = FacebookConnector.attachment_content(post.get('attachments'))
+        return post
+
+    @staticmethod
+    def attachment_content(connection, depth=0):
+        if connection is None:
+            return {'data': []}
+        if (not isinstance(connection, dict) or not isinstance(connection.get('data', []), list)
+                or depth > 1 or any(not isinstance(a, dict) for a in connection.get('data', []))):
+            raise HubError('invalid_api_response', 'Meta returned invalid Facebook attachment data')
+        items = []
+        for item in connection.get('data', []):
+            attachment = dict(item)
+            if 'subattachments' in attachment:
+                attachment['subattachments'] = FacebookConnector.attachment_content(attachment['subattachments'], depth + 1)
+            items.append(attachment)
+        result = {'data': items}
+        # Attachment paging links can contain access tokens just like the
+        # outer posts edge. Return an indicator, never those upstream URLs.
+        if isinstance(connection.get('paging'), dict) and connection['paging'].get('next'):
+            result['has_more'] = True
+        return result
+
+    async def list_posts(self, remote_id, limit=25, cursor=None):
+        page = await super().list_posts(remote_id, limit, cursor)
+        page['items'] = [self.post_content(item) for item in page['items']]
+        return page
 
     async def discover(self, cursor=None):
         params = {'fields': 'id,name,tasks,instagram_business_account', 'limit': 100}

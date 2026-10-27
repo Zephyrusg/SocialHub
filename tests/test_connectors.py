@@ -16,7 +16,10 @@ async def test_meta_read_and_cursor(cls, edge):
     result = await connector.list_posts('123', 10, 'cursor')
     assert seen[0].url.path == f'/v25.0/123/{edge}'
     assert seen[0].url.params['after'] == 'cursor'
-    assert result == {'items': [{'id': 'p1'}], 'next_cursor': 'next-cursor'}
+    item = {'id': 'p1'}
+    if cls is FacebookConnector:
+        item.update(message=None, story=None, full_picture=None, attachments={'data': []})
+    assert result == {'items': [item], 'next_cursor': 'next-cursor'}
     assert 'untrusted' not in str(result)
 
 

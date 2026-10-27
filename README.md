@@ -17,6 +17,7 @@ This is an evolving single-owner project. The current live-account allowlist is 
 ## What works today
 
 - Facebook and Instagram read connectors using the Meta Graph API.
+- Facebook post text, stories and photo/video attachment metadata through consistent [post content reads](docs/facebook-content.md).
 - ChatGPT OAuth linking and MCP reads tested end to end against an isolated mock-data staging environment.
 - Exact publication previews, content/media hashes and persistent per-account operation states.
 - Publishing and supported edit/reply methods implemented behind feature flags and approval checks; coverage varies by operation and platform.
