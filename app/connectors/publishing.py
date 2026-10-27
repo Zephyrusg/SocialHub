@@ -62,16 +62,24 @@ class MetaPublishingConnector:
             error.diagnostics = dict(error.diagnostics, mutation_attempted=False)
             raise
 
+    async def finalize_delivery(self, account_id, request, checkpoint):
+        """Resolve acknowledged delivery metadata; never calls a mutation method."""
+        self.connector.check_account(account_id)
+        state = dict(checkpoint)
+        if state.get('stage') != 'delivered' or not state.get('remote_id'):
+            raise HubError('reconciliation_denied', 'Only an acknowledged delivery can be finalized')
+        if request['operation'] != 'publish':
+            return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': state.get('permalink')}}
+        fields = 'id,permalink' if self.platform == 'instagram' else ('id,link' if state.get('lookup_kind') == 'photo' else 'id,permalink_url')
+        info = await self.read(state['remote_id'], {'fields': fields})
+        return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': info.get('permalink') or info.get('permalink_url') or info.get('link')}}
+
     async def step(self, account_id, request, checkpoint):
+        if checkpoint.get('stage') == 'delivered':
+            return await self.finalize_delivery(account_id, request, checkpoint)
         self.connector.write_guard(account_id)
         operation, kind, text = request['operation'], request['content_type'], request['text']
         state = dict(checkpoint)
-        if state.get('stage') == 'delivered':
-            if operation != 'publish':
-                return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': state.get('permalink')}}
-            fields = 'id,permalink' if self.platform == 'instagram' else ('id,link' if state.get('lookup_kind') == 'photo' else 'id,permalink_url')
-            info = await self.read(state['remote_id'], {'fields': fields})
-            return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': info.get('permalink') or info.get('permalink_url') or info.get('link')}}
         if operation == 'update':
             response = await self.graph.mutate('POST', request['post_id'], {'message': text})
             if response.get('success') is not True:

@@ -167,6 +167,8 @@ def create_server(settings=None):
                 value = await publishing.execute(token.client_id, token.scopes, arguments['publication_id'], context=token)
             elif action == 'requirements':
                 value = publishing.approval_requirements(arguments['publication_id'], token.client_id, token)
+            elif action == 'status':
+                value = await publishing.refresh_status(arguments['publication_id'], token.client_id)
             else:
                 value = publishing.review(arguments['publication_id'], token.client_id)
             if action != 'requirements':
@@ -208,8 +210,8 @@ def create_server(settings=None):
 
     @mcp.tool(annotations=read, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read']}]})
     async def get_publication_status(publication_id: Short) -> dict[str, Any]:
-        """Read stored platform results/errors and retry time. Does not advance an upload or publish content."""
-        return await publication_call('review', publication_id=publication_id)
+        """Read status and refresh acknowledged delivery metadata using Meta GETs only. Never publishes, resumes uploads or retries a mutation."""
+        return await publication_call('status', publication_id=publication_id)
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False), structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read']}]})
     async def get_approval_requirements(publication_id: Short) -> dict[str, Any]:

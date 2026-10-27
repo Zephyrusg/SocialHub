@@ -130,6 +130,7 @@ class PublishingService:
                 'approval_channel': approval.channel if approval else None,
                 'independent_owner_approval': bool(approval and approval.channel in {'owner_cli', 'owner_portal'} and approval.expires_at > self.clock()),
                 'targets': [{'target_id': t.id, 'account_id': t.account_id, 'state': t.state,
+                    'delivery_confirmed': t.state == 'succeeded' or t.checkpoint.get('stage') == 'delivered',
                     'checkpoint': {k: v for k, v in t.checkpoint.items() if k in {'stage', 'remote_id', 'container_id', 'polls'}},
                     'result': t.result, 'error': {'code': t.error_code, 'message': t.error_message} if t.error_code else None,
                     'attempts': t.attempts, 'retry_at': t.next_attempt_at.isoformat() + 'Z' if t.next_attempt_at else None} for t in targets]}
@@ -290,7 +291,59 @@ class PublishingService:
                 # Never expose provider exceptions or silently resend after an unexpected failure.
                 self.finish(publication_id, target['target_id'], principal, claim['lease'],
                     {'state': 'uncertain' if sent else 'failed', 'checkpoint': checkpoint, 'error_code': 'internal_error', 'error_message': 'Operation failed; inspect safe operation status before any retry'})
+        return await self.refresh_status(publication_id, principal)
+
+    async def refresh_status(self, publication_id, principal):
+        """Refresh only durable delivered checkpoints; no claims or Meta mutations."""
+        preview = self.review(publication_id, principal)
+        for snapshot in preview['targets']:
+            if (snapshot['state'] not in {'processing', 'retryable'}
+                    or snapshot['checkpoint'].get('stage') != 'delivered'):
+                continue
+            with self.sessions() as db:
+                current = db.get(PublicationTarget, snapshot['target_id'])
+                if (not current or current.state != snapshot['state'] or current.lease_token is not None
+                        or current.checkpoint.get('stage') != 'delivered'):
+                    continue
+                if current.next_attempt_at and current.next_attempt_at > self.clock():
+                    continue
+                checkpoint = dict(current.checkpoint)
+            try:
+                account, _, adapter = self.context(snapshot['account_id'], execute=False)
+                if not isinstance(adapter, MetaPublishingConnector):
+                    continue
+                outcome = await adapter.finalize_delivery(account.remote_id, preview['preview']['request'], checkpoint)
+                error = None
+            except HubError as caught:
+                error = caught
+            except Exception:
+                error = HubError('internal_error', 'Delivery was acknowledged; metadata refresh failed without a new write')
+            with self.sessions.begin() as db:
+                self.checked(db, publication_id, principal)
+                target = db.scalar(select(PublicationTarget).where(PublicationTarget.id == snapshot['target_id']).with_for_update())
+                if (not target or target.state != snapshot['state'] or target.lease_token is not None
+                        or target.checkpoint != checkpoint):
+                    continue
+                if error is not None:
+                    target.error_code, target.error_message = error.code, error.message[:256]
+                    target.next_attempt_at = self.clock() + timedelta(seconds=60)
+                    # Keep the acknowledgement; a missing permalink is not a failed post.
+                    continue
+                target.state, target.result = 'succeeded', outcome['result']
+                target.error_code, target.error_message, target.next_attempt_at = None, None, None
+                self.remember_post(db, publication_id, target)
+                db.add(Audit(subject=preview['principal'], operation='finalize_publication', account_id=target.account_id,
+                    outcome='success', details={'publication_id': publication_id, 'target_id': target.id,
+                        'remote_id': target.result['remote_id'], 'mutation_attempted': False}))
         return self.review(publication_id, principal)
+
+    def remember_post(self, db, publication_id, target):
+        publication = db.get(Publication, publication_id)
+        if publication.payload['request']['operation'] == 'publish' and target.result.get('remote_id'):
+            existing = db.scalar(select(Post).where(Post.account_id == target.account_id, Post.remote_id == target.result['remote_id']))
+            if not existing:
+                db.add(Post(account_id=target.account_id, remote_id=target.result['remote_id'],
+                    content={'publication_id': publication_id, 'permalink': target.result.get('permalink')}))
 
     def finish(self, publication_id, target_id, principal, lease, outcome):
         with self.sessions.begin() as db:
@@ -307,11 +360,7 @@ class PublishingService:
             db.add(Audit(subject=principal, operation='execute_publication', account_id=target.account_id, outcome=target.state,
                 details={'publication_id': publication_id, 'target_id': target.id, 'error_code': target.error_code, 'remote_id': target.result.get('remote_id')}))
             if target.state == 'succeeded' and target.result.get('remote_id'):
-                publication = db.get(Publication, publication_id)
-                if publication.payload['request']['operation'] == 'publish':
-                    existing = db.scalar(select(Post).where(Post.account_id == target.account_id, Post.remote_id == target.result['remote_id']))
-                    if not existing:
-                        db.add(Post(account_id=target.account_id, remote_id=target.result['remote_id'], content={'publication_id': publication_id, 'permalink': target.result.get('permalink')}))
+                self.remember_post(db, publication_id, target)
 
     async def reconcile(self, publication_id, target_id, remote_id, issuer):
         """LOCAL OWNER ONLY: verify a known owned remote object; never sends a mutation."""

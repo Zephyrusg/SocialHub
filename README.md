@@ -64,6 +64,8 @@ docker run --rm --no-healthcheck --tmpfs /tmp:size=64m,mode=1777 socialhub:test
 
 The Python tests use temporary databases and fake API transports; they do not require real Meta credentials or publish social content. Host-side video tests may skip when ffprobe is unavailable; the Docker test target includes it.
 
+Acknowledged Meta deliveries finalize through GET-only metadata refresh; status polling does not publish again. See [delivery finalization](docs/delivery-finalization.md).
+
 Documentation: [development](docs/development.md), [deployment](docs/deployment.md), [setup administration](docs/administration.md), and [security boundaries](docs/security.md).
 
 ## Deployment direction
