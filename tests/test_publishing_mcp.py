@@ -17,7 +17,7 @@ from test_publishing import FakeAdapter, prepare, approve, publisher
 async def test_mcp_prepare_approve_execute_and_legacy_preview(tmp_path,monkeypatch):
     url=f'sqlite:///{tmp_path}/mcp.db';engine,sessions=database(url);Base.metadata.create_all(engine)
     s=Settings(_env_file=None,database_url=url,encryption_key=Fernet.generate_key().decode(),local_token='a'*64,
-        meta_app_id='12345',meta_app_secret='fake-app-secret',meta_live_reads=True,publishing_enabled=True,meta_live_writes=True,media_root=str(tmp_path/'media'))
+        meta_app_id='12345',meta_app_secret='fake-app-secret',meta_live_reads=True,publishing_enabled=True,meta_live_writes=True,meta_write_account_ids=["pixelpapa-facebook","pixelpapa-instagram"],media_root=str(tmp_path/'media'))
     await MetaOAuth(s,sessions,httpx.MockTransport(MetaFixture())).connect('long-user')
     calls=[];fake=FakeAdapter('facebook',calls)
     original=PublishingService.context
@@ -97,7 +97,7 @@ async def test_chatgpt_policy_uses_signed_client_identity_through_real_mcp(tmp_p
         oauth_allowed_subjects=['alice'],publishing_allowed_subjects=['alice'],oauth_allowed_client_ids=['real-client','impostor'],auth_mode='oauth',oauth_issuer='https://issuer.example/',oauth_jwks_url='https://issuer.example/keys',
         oauth_audience='https://hub.example/mcp',public_url='https://hub.example/mcp',
         meta_app_id='12345',meta_app_secret='fake-app-secret',meta_live_reads=True,
-        publishing_enabled=True,meta_live_writes=True,approval_mode='chatgpt_native',
+        publishing_enabled=True,meta_live_writes=True,meta_write_account_ids=["pixelpapa-facebook","pixelpapa-instagram"],approval_mode='chatgpt_native',
         chatgpt_confirmation_tested=True,chatgpt_confirmation_evidence_sha256='e'*64,
         chatgpt_residual_risk_accepted=True,chatgpt_allowed_client_ids=['real-client'],chatgpt_allowed_principals=['alice'],
         media_root=str(tmp_path/'media'))

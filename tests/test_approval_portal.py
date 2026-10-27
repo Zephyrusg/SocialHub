@@ -29,7 +29,7 @@ async def portal(tmp_path):
     engine,sessions=database(url);Base.metadata.create_all(engine)
     s=Settings(_env_file=None,database_url=url,encryption_key=Fernet.generate_key().decode(),local_token='a'*64,
         meta_app_id='12345',meta_app_secret='fake-app-secret',meta_live_reads=True,publishing_enabled=True,
-        meta_live_writes=True,media_root=str(tmp_path/'media'),approval_portal_enabled=True)
+        meta_live_writes=True,meta_write_account_ids=["pixelpapa-facebook","pixelpapa-instagram"],media_root=str(tmp_path/'media'),approval_portal_enabled=True)
     await MetaOAuth(s,sessions,httpx.MockTransport(MetaFixture())).connect('long-user')
     calls=[];service=PublishingService(s,sessions,lambda a,e:FakeAdapter(a.platform,calls))
     preview=await prepare(service,key='portal')

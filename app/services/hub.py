@@ -85,12 +85,13 @@ class Hub:
                 caps = capabilities(account.platform, credential.scopes, stored.get('tasks', []), account.account_type)
                 checked_at = stored.get('checked_at')
                 account_type_source = stored.get('account_type_source', 'unknown')
-                caps['live_writes_enabled'] = self.settings.meta_live_writes and self.settings.publishing_enabled
+                caps['write_account_allowed'] = account.id in self.settings.meta_write_account_ids
+                caps['live_writes_enabled'] = bool(caps['write_account_allowed'] and self.settings.meta_live_writes and self.settings.publishing_enabled)
                 if account.platform == 'instagram' and account_type_source != 'api_returned':
                     caps['stories'] = False
             if operation == 'get_account_capabilities':
                 return {'account_id': account.id, 'mock': account.is_mock, 'capabilities': caps, 'verified_at': checked_at, 'account_type_source': account_type_source,
-                        'limitations': ['Facebook updates limited to supported post fields/types', 'Instagram post editing unavailable', 'Analytics not implemented', 'Live writes disabled']}
+                        'limitations': ['Facebook updates limited to supported post fields/types', 'Instagram post editing unavailable', 'Analytics not implemented'] + ([] if caps.get('live_writes_enabled') else ['Live writes disabled'])}
             if not caps.get(operation):
                 raise HubError('unsupported_operation', 'Operation not supported for this account')
             try:

@@ -46,7 +46,7 @@ async def publisher(sessions, tmp_path):
     from cryptography.fernet import Fernet
     s = Settings(_env_file=None, database_url='sqlite://', encryption_key=Fernet.generate_key().decode(),
         local_token='a'*64, meta_app_id='12345', meta_app_secret='fake-app-secret', meta_live_reads=True,
-        publishing_enabled=True, meta_live_writes=True, media_root=str(tmp_path / 'media'), media_public_base_url='https://media.example.test')
+        publishing_enabled=True, meta_live_writes=True,meta_write_account_ids=["pixelpapa-facebook","pixelpapa-instagram"], media_root=str(tmp_path / 'media'), media_public_base_url='https://media.example.test')
     await MetaOAuth(s, sessions, httpx.MockTransport(MetaFixture())).connect('long-user')
     calls = []
     adapters = {p: FakeAdapter(p, calls) for p in ['facebook', 'instagram']}

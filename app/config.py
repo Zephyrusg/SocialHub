@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     meta_instagram_account_type: Literal['creator', 'business'] = 'creator'
     meta_live_reads: bool = False
     meta_live_writes: bool = False
+    meta_write_account_ids: list[Literal['pixelpapa-facebook', 'pixelpapa-instagram']] = []
     publishing_enabled: bool = False
     approval_mode: Literal['owner_required', 'chatgpt_native'] = 'owner_required'
     chatgpt_confirmation_tested: bool = False

@@ -22,13 +22,14 @@ class ApprovalPolicy:
             and context.oauth_client_id in s.chatgpt_allowed_client_ids
             and principal in s.chatgpt_allowed_principals and principal in s.publishing_allowed_subjects
             and payload['request']['operation'] in s.chatgpt_allowed_operations
+            and all(aid in s.meta_write_account_ids for aid in payload['request']['account_ids'])
             and len(payload['request']['account_ids']) == 1)
 
     def fingerprint(self):
         s = self.settings
         values = [s.approval_mode, s.oauth_issuer, s.oauth_audience,
                   sorted(s.chatgpt_allowed_client_ids), sorted(s.chatgpt_allowed_principals), sorted(s.publishing_allowed_subjects),
-                  sorted(s.chatgpt_allowed_operations), s.chatgpt_confirmation_tested,
+                  sorted(s.chatgpt_allowed_operations), sorted(s.meta_write_account_ids), s.chatgpt_confirmation_tested,
                   s.chatgpt_confirmation_evidence_sha256, s.chatgpt_residual_risk_accepted]
         return hashlib.sha256(json.dumps(values, separators=(',', ':')).encode()).hexdigest()
 

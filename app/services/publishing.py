@@ -14,6 +14,7 @@ from app.connectors.meta import GraphClient, FacebookConnector, InstagramConnect
 from app.connectors.meta_policy import capabilities
 from app.connectors.publishing import MetaPublishingConnector
 from app.services.approval_policy import ApprovalPolicy
+from app.services.write_access import require_write_accounts
 from app.services.administration import require_publisher, effective_settings
 
 
@@ -29,6 +30,8 @@ class PublishingService:
         self.approval_policy = ApprovalPolicy(settings)
 
     def context(self, account_id, execute=False):
+        if execute:
+            require_write_accounts(self.settings, [account_id])
         from app.services.hub import Hub
         active = effective_settings(self.settings, self.sessions)
         with self.sessions() as db:
@@ -57,6 +60,7 @@ class PublishingService:
             request = PublicationRequest.model_validate(request)
         data = request.model_dump()
         data['account_ids'] = sorted(data['account_ids'])
+        require_write_accounts(self.settings, data['account_ids'])
         assets = [self.media.get(mid, principal) for mid in data['media_ids']]
         for asset in assets:
             if not asset['metadata'].get('validated'):
@@ -121,7 +125,8 @@ class PublishingService:
                 state = 'in_progress'
             return {'publication_id': item.id, 'request_hash': item.request_hash, 'principal': item.principal,
                 'preview': item.payload, 'state': state, 'requires_owner_approval': not bool(approval and approval.expires_at > self.clock()),
-                'live_writes_enabled': self.settings.meta_live_writes and self.settings.publishing_enabled,
+                'live_writes_enabled': bool(self.settings.meta_live_writes and self.settings.publishing_enabled
+                    and all(aid in self.settings.meta_write_account_ids for aid in item.payload['request']['account_ids'])),
                 'approval_channel': approval.channel if approval else None,
                 'independent_owner_approval': bool(approval and approval.channel in {'owner_cli', 'owner_portal'} and approval.expires_at > self.clock()),
                 'targets': [{'target_id': t.id, 'account_id': t.account_id, 'state': t.state,
@@ -139,6 +144,7 @@ class PublishingService:
             raise HubError('authorization_required', 'An independent owner channel is required')
         with self.sessions.begin() as db:
             item = self.checked(db, publication_id, None)
+            require_write_accounts(self.settings, item.payload['request']['account_ids'])
             if item.request_hash != expected_hash:
                 raise HubError('preview_changed', 'Owner review hash does not match the exact preview')
             approval = db.scalar(select(PublicationApproval).where(PublicationApproval.publication_id == publication_id).with_for_update())
@@ -184,7 +190,8 @@ class PublishingService:
                 and grant.evidence_hash == self.approval_policy.fingerprint())
             result['owner_grant_valid'] = bool(owner_valid)
             result['current_grant_valid'] = bool(owner_valid or policy_valid)
-            result['live_writes_enabled'] = self.settings.meta_live_writes and self.settings.publishing_enabled
+            result['write_accounts_allowed'] = all(aid in self.settings.meta_write_account_ids for aid in item.payload['request']['account_ids'])
+            result['live_writes_enabled'] = bool(result['write_accounts_allowed'] and self.settings.meta_live_writes and self.settings.publishing_enabled)
             if grant and not (owner_valid or policy_valid):
                 result.update(independent_owner_required=True, execution_channel='independent_owner',
                               next_step='The prior grant expired, was revoked, or no longer matches policy. A fresh independent owner decision is required; do not retry or mint a replacement automatically.')
@@ -196,6 +203,7 @@ class PublishingService:
     def claim(self, publication_id, target_id, principal, context=None):
         with self.sessions.begin() as db:
             item = self.checked(db, publication_id, principal)
+            require_write_accounts(self.settings, item.payload['request']['account_ids'])
             approval = db.scalar(select(PublicationApproval).where(PublicationApproval.publication_id == publication_id).with_for_update())
             if approval is None and self.approval_policy.eligible(principal, item.payload, context):
                 approval = PublicationApproval(publication_id=item.id, principal=principal, request_hash=item.request_hash,
@@ -244,6 +252,7 @@ class PublishingService:
             raise HubError('insufficient_scope', 'The authenticated caller requires socialhub:publish')
         require_publisher(self.settings, principal)
         current = self.review(publication_id, principal)
+        require_write_accounts(self.settings, current['preview']['request']['account_ids'])
         for target in current['targets']:
             claim = self.claim(publication_id, target['target_id'], principal, context)
             if claim is None:
