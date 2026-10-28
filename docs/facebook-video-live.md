@@ -19,6 +19,10 @@ returned a relative `/reel/.../` permalink. Facebook link normalization now retu
 an absolute HTTPS Facebook URL, including from video-processing finalization;
 malformed, credential-bearing and non-Facebook links are not surfaced as permalinks.
 The complete automated suite passes 409 tests.
+The normalization fix was deployed through Git to ARM64 production and the WSL
+mock testlab. Runtime settings, credentials/history and ffprobe stayed unchanged;
+only the app was recreated. A network-forbidden cached-status check confirmed
+the deleted video's succeeded history, one attempt and absolute permalink.
 
 The owner explicitly authorized deletion after a successful check. A separate
 administrative cleanup durably recorded that instruction, rechecked the exact

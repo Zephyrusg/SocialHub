@@ -88,14 +88,15 @@ fixture encoding occurred during either check. No additional media dependencies
 were installed for Phase 3D; the runtime retains the existing standalone ffprobe
 and image validator. Test fixtures and benchmark harnesses are not in the image.
 
-The resource measurements above were taken from application source `05802ed`.
-The later deployed timeout/reconciliation fix is `5347266`; its ARM64 image is
-123,408,320 bytes (117.7 MiB Docker-reported size). That follow-up changes Python
-code only and preserves the ffprobe binary byte-for-byte and all dependencies.
-RAM/CPU figures above are the original measurements, not a repeated benchmark
-of the follow-up image. Image publishing was tested once and disabled again;
-the first controlled video publication has now passed. Later permalink
-normalization changes only Python code and preserves the media binary/dependencies.
+The instrumented resource measurements above used application source `05802ed`.
+The final deployed permalink fix is `c631c0a`: its ARM64 image is 123,420,090 bytes
+(117.7 MiB Docker-reported), with 343,019,008 bytes of uncompressed layer tars.
+The actual production server subsequently measured 72.4 MiB idle RSS. This is a
+normal-service snapshot, not a comparable instrumented performance improvement.
+Validation CPU/worker RAM figures remain the earlier native fixture benchmark;
+they were not repeated after the Python-only fixes. The ffprobe binary and all
+dependencies remain byte-identical. Both image and video tests have passed and
+media publishing is disabled again; the authorized video cleanup is verified.
 Private operational evidence contains the complete measurements and artifact
 manifest, without committing identities, attachment references or credentials.
 
