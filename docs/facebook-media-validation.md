@@ -8,10 +8,13 @@ Production media publishing has not been activated or tested.
 The owner subsequently authorized an import-only production rollout. The tested
 ARM64 runtime is healthy with a private HDD media bind and bounded imports.
 Existing Facebook text publishing and its approval policy were preserved;
-Facebook media publishing, signed delivery and Instagram writes remain disabled.
+Facebook media publishing and Instagram writes remain disabled. Signed delivery
+was subsequently enabled for separately authorized download-only testing.
 Credentials, publication history and the database schema were unchanged, and only
 SocialHub was recreated. Public discovery/authentication checks passed through
-the external proxy; raw upload and media download routes remain blocked there.
+the external proxy; raw upload remains blocked. A narrow UUID-only GET/HEAD media
+route now requires valid per-asset, checksum-bound, short-lived signatures (or
+authenticated owner access verified by the application).
 Actual ChatGPT production image and Google Flow video imports and real-account
 immutable previews have passed. Independent server checks confirmed matching
 stored bytes/content hashes, private permissions, expiry and zero execution
@@ -31,6 +34,9 @@ attempts for both prepared requests. No publication was executed.
 | Staging publications | Zero |
 | Production image import and immutable preview | Passed; prepared with zero execution attempts |
 | Production Google Flow video import and immutable preview | Passed; prepared with zero execution attempts |
+| External image/video signed GET, HEAD and prefix/suffix ranges | Passed through the VPS with verified TLS |
+| External unsigned, expired, tampered, duplicate and cross-asset signatures | Rejected |
+| External multiple/unsatisfiable ranges and write methods | Rejected; upload route remains blocked |
 
 The owner confirmed that the tested 10.005-second H.264/AAC MP4 was a Google
 Flow export. Its actual ChatGPT transfer, validation, staging import and reuse
@@ -83,12 +89,15 @@ manifest, without committing identities, attachment references or credentials.
 
 ## Remaining gates
 
-1. Review and authorize the narrow signed media GET/HEAD route, verify external
-   signed downloads and ranges, and verify expired/tampered URL rejection.
-   A UUID-only GET/HEAD proposal has passed an isolated local Nginx syntax check;
-   full production configuration validation and activation await authorization.
-   Additional HTTP tests cover HEAD, correct bytes, expiry, tampered/duplicate
-   query parameters, multiple/unsatisfiable ranges and rejected POST requests.
-2. Obtain explicit authorization for exact live Facebook image and video test
+The signed-download rollout passed the full production Nginx syntax check before
+a graceful reload; only SocialHub was recreated for delivery settings. Thirty
+external checks passed without Meta requests or publication calls. The privacy
+marker was absent from Pi container logs; the operator confirmed a zero count
+in the bounded VPS access/error log check. Capability URLs remained in memory
+and were not printed or written into reports. VPS configuration was unchanged.
+Post-test checks confirmed both media previews still prepared, zero execution
+attempts, Facebook media publishing disabled and existing text policy preserved.
+
+1. Obtain explicit authorization for exact live Facebook image and video test
    publications, one at a time. Instagram remains disabled. No real media was
    published in this phase's completed checks.

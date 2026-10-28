@@ -66,7 +66,7 @@ The Python tests use temporary databases and fake API transports; they do not re
 
 Acknowledged Meta deliveries finalize through GET-only metadata refresh; status polling does not publish again. See [delivery finalization](docs/delivery-finalization.md).
 
-Phase 3D adds guarded ChatGPT attachment probes/import, expiring private media and Facebook image/video workflows. Actual host-transfer and live media acceptance remain activation gates; see [Facebook media](docs/facebook-media.md).
+Phase 3D adds guarded ChatGPT attachment import, expiring private media and Facebook image/video workflows. Actual PNG and Google Flow MP4 imports/previews and signed external downloads have passed. Live image/video publication still requires separately authorized acceptance tests; see the [validation report](docs/facebook-media-validation.md) and [Facebook media](docs/facebook-media.md).
 
 Documentation: [development](docs/development.md), [deployment](docs/deployment.md), [setup administration](docs/administration.md), and [security boundaries](docs/security.md).
 
