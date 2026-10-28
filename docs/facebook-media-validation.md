@@ -27,6 +27,11 @@ Actual ChatGPT production imports and real-account previews are the next check.
 | Audit/idempotency persistence | One import audit and one idempotency record per tested asset |
 | Staging publications | Zero |
 
+The owner confirmed that the tested 10.005-second H.264/AAC MP4 was a Google
+Flow export. Its actual ChatGPT transfer, validation, staging import and reuse
+passed. This confirms the tested export profile; production video preparation
+and real publishing remain separate checks.
+
 The automated suite covers captions, immutable previews, ownership, quotas,
 stream limits, cancellation, expiry cleanup, SSRF/DNS/TLS boundaries, exact-host
 isolation, image finalization, asynchronous video readiness/failure and preventing
@@ -73,14 +78,14 @@ manifest, without committing identities, attachment references or credentials.
 
 ## Remaining gates
 
-1. Confirm whether the tested clip is a Google Flow export before claiming that
-   specific export path has passed.
-2. Test production ChatGPT imports and actual immutable image/video previews
-   against the connected real account, with media writes and delivery disabled.
+1. Test production ChatGPT video import and its immutable real-account preview.
+   The production image import and preview have passed, independently checked for
+   matching file/content hashes, private permissions, expiry and zero execution
+   attempts. Both media write gates remain disabled.
    Isolated staging mock accounts intentionally cannot use the durable publisher;
    this safeguard has not been bypassed.
-3. Review and authorize the narrow signed media GET/HEAD route, verify external
+2. Review and authorize the narrow signed media GET/HEAD route, verify external
    signed downloads and ranges, and verify expired/tampered URL rejection.
-4. Obtain explicit authorization for exact live Facebook image and video test
+3. Obtain explicit authorization for exact live Facebook image and video test
    publications, one at a time. Instagram remains disabled. No real media was
    published in this phase's completed checks.
