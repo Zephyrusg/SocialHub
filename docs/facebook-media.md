@@ -24,8 +24,13 @@ registering a media asset or publishing. Success is
 Image and MP4 inputs must be tested separately, including a real Flow export
 before claiming compatibility. **Documentation, a synthetic HTTP transport, or a
 reference-only probe is not actual ChatGPT media ingestion acceptance.** Actual
-host checks remain a rollout gate. The pull-reference mechanism is the candidate
-architecture until those checks pass. If the host cannot provide an MP4 reference,
+host checks remain a rollout gate. Actual ChatGPT PNG and H.264/AAC MP4 attachment
+probes have passed in isolated WSL staging: temporary download and validation
+succeeded without registering or publishing media. This establishes the
+pull-reference mechanism for these tested inputs. Controlled retained imports,
+publication preparation, a confirmed Flow export and authorized live media
+publishing remain separate acceptance checks. Private operational notes hold
+the regional host inventory and test evidence. If the host cannot provide an MP4 reference,
 report the limitation and evaluate an inline file picker/upload bridge; do not
 silently require pasted URLs, base64 payloads, a terminal or a separate portal.
 
