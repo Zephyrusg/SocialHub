@@ -112,3 +112,34 @@ async def test_signed_download_range_and_no_cross_principal_access(tmp_path):
             response=await client.get(signed,headers={'Range':'bytes=0-15'})
             assert response.status_code==206 and len(response.content)==16
             assert (await client.get(signed,headers={'Authorization':'Bearer '+'a'*64})).status_code==403
+
+
+async def test_signed_delivery_http_head_expiry_tampering_and_ranges(tmp_path):
+    import time
+    from urllib.parse import urlencode
+    from app.database import database
+    from app.database.models import Base
+    from app.main import create_server
+    url=f'sqlite:///{tmp_path}/delivery.db';engine,sessions=database(url);Base.metadata.create_all(engine)
+    s=Settings(_env_file=None,database_url=url,local_token='a'*64,
+        encryption_key=Fernet.generate_key().decode(),media_root=str(tmp_path/'media'),
+        media_public_base_url='https://localhost:8787',media_delivery_enabled=True)
+    manager=MediaManager(s,sessions);asset=manager.save(valid_image(tmp_path/'image'),'owner')
+    signed=manager.temporary_url(asset['id'],asset['sha256'])
+    base=signed.split('?',1)[0];expiry=int(time.time())-1
+    expired=base+'?'+urlencode({'expires':expiry,'signature':manager.signature(asset['id'],asset['sha256'],expiry)})
+    app=create_server(s).streamable_http_app()
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+            head=await client.head(signed)
+            assert head.status_code==200 and head.content==b''
+            assert int(head.headers['content-length'])==asset['size']
+            assert 'no-store' in head.headers['cache-control'] and head.headers['x-content-type-options']=='nosniff'
+            full=await client.get(signed)
+            assert full.status_code==200 and full.content==Path('tests/fixtures/portrait.jpg').read_bytes()
+            for denied in [base,expired,signed+'&signature=duplicate',signed+'&expires=0',signed[:-1]+('0' if signed[-1]!='0' else '1')]:
+                response=await client.get(denied)
+                assert response.status_code==403 and response.json()=={'error':'media_access_denied'}
+            assert (await client.get(signed,headers={'Range':'bytes=0-1,4-5'})).status_code==403
+            assert (await client.get(signed,headers={'Range':f"bytes={asset['size']+1}-"})).status_code==416
+            assert (await client.post(signed,content=b'not-an-upload')).status_code==405

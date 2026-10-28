@@ -1,6 +1,6 @@
 # Phase 3D validation — 2026-10-28
 
-The feature-gated implementation passes 370 automated tests. Actual ChatGPT
+The feature-gated implementation passes 371 automated tests. Actual ChatGPT
 attachment transfer, validation, retained import and idempotent reuse have passed
 for a PNG and an H.264/AAC MP4 in isolated OAuth-authenticated WSL staging.
 Production media publishing has not been activated or tested.
@@ -12,7 +12,10 @@ Facebook media publishing, signed delivery and Instagram writes remain disabled.
 Credentials, publication history and the database schema were unchanged, and only
 SocialHub was recreated. Public discovery/authentication checks passed through
 the external proxy; raw upload and media download routes remain blocked there.
-Actual ChatGPT production imports and real-account previews are the next check.
+Actual ChatGPT production image and Google Flow video imports and real-account
+immutable previews have passed. Independent server checks confirmed matching
+stored bytes/content hashes, private permissions, expiry and zero execution
+attempts for both prepared requests. No publication was executed.
 
 ## Actual ChatGPT checks
 
@@ -26,11 +29,13 @@ Actual ChatGPT production imports and real-account previews are the next check.
 | Server-side integrity, access permissions and expiry | Passed for both stored assets |
 | Audit/idempotency persistence | One import audit and one idempotency record per tested asset |
 | Staging publications | Zero |
+| Production image import and immutable preview | Passed; prepared with zero execution attempts |
+| Production Google Flow video import and immutable preview | Passed; prepared with zero execution attempts |
 
 The owner confirmed that the tested 10.005-second H.264/AAC MP4 was a Google
 Flow export. Its actual ChatGPT transfer, validation, staging import and reuse
-passed. This confirms the tested export profile; production video preparation
-and real publishing remain separate checks.
+passed. Its production import and preparation have also passed. This confirms
+the tested export profile; real publishing remains a separate check.
 
 The automated suite covers captions, immutable previews, ownership, quotas,
 stream limits, cancellation, expiry cleanup, SSRF/DNS/TLS boundaries, exact-host
@@ -78,14 +83,12 @@ manifest, without committing identities, attachment references or credentials.
 
 ## Remaining gates
 
-1. Test production ChatGPT video import and its immutable real-account preview.
-   The production image import and preview have passed, independently checked for
-   matching file/content hashes, private permissions, expiry and zero execution
-   attempts. Both media write gates remain disabled.
-   Isolated staging mock accounts intentionally cannot use the durable publisher;
-   this safeguard has not been bypassed.
-2. Review and authorize the narrow signed media GET/HEAD route, verify external
+1. Review and authorize the narrow signed media GET/HEAD route, verify external
    signed downloads and ranges, and verify expired/tampered URL rejection.
-3. Obtain explicit authorization for exact live Facebook image and video test
+   A UUID-only GET/HEAD proposal has passed an isolated local Nginx syntax check;
+   full production configuration validation and activation await authorization.
+   Additional HTTP tests cover HEAD, correct bytes, expiry, tampered/duplicate
+   query parameters, multiple/unsatisfiable ranges and rejected POST requests.
+2. Obtain explicit authorization for exact live Facebook image and video test
    publications, one at a time. Instagram remains disabled. No real media was
    published in this phase's completed checks.

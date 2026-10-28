@@ -29,9 +29,10 @@ probes have passed in isolated WSL staging: temporary download and validation
 succeeded without registering or publishing media. This establishes the
 pull-reference mechanism for these tested inputs. The owner confirmed that the
 tested H.264/AAC MP4 was a Google Flow export. This verifies that specific export,
-not every Flow codec or export option. Actual real-account video
-publication preparation and authorized live media
-publishing remain separate acceptance checks. Private operational notes hold
+not every Flow codec or export option. Production image/video imports and exact
+real-account previews have also passed, with zero execution attempts. External
+signed delivery and authorized live media publishing remain separate acceptance
+checks. Private operational notes hold
 the regional host inventory and test evidence. If the host cannot provide an MP4 reference,
 report the limitation and evaluate an inline file picker/upload bridge; do not
 silently require pasted URLs, base64 payloads, a terminal or a separate portal.
