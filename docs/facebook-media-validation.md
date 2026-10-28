@@ -5,6 +5,15 @@ attachment transfer, validation, retained import and idempotent reuse have passe
 for a PNG and an H.264/AAC MP4 in isolated OAuth-authenticated WSL staging.
 Production media publishing has not been activated or tested.
 
+The owner subsequently authorized an import-only production rollout. The tested
+ARM64 runtime is healthy with a private HDD media bind and bounded imports.
+Existing Facebook text publishing and its approval policy were preserved;
+Facebook media publishing, signed delivery and Instagram writes remain disabled.
+Credentials, publication history and the database schema were unchanged, and only
+SocialHub was recreated. Public discovery/authentication checks passed through
+the external proxy; raw upload and media download routes remain blocked there.
+Actual ChatGPT production imports and real-account previews are the next check.
+
 ## Actual ChatGPT checks
 
 | Check | Result |
@@ -57,7 +66,8 @@ and image validator. Test fixtures and benchmark harnesses are not in the image.
 
 The candidate image contains application source from commit `05802ed`; subsequent
 regional-host tests and acceptance-report commits do not change runtime code.
-This is a deployment candidate size, not a claim that production was upgraded.
+The same measured artifact now serves the authorized import-only production
+rollout; image/video publishing acceptance is still pending.
 Private operational evidence contains the complete measurements and artifact
 manifest, without committing identities, attachment references or credentials.
 
@@ -65,14 +75,12 @@ manifest, without committing identities, attachment references or credentials.
 
 1. Confirm whether the tested clip is a Google Flow export before claiming that
    specific export path has passed.
-2. Review a production candidate rollout with the approved HDD bind and importing,
-   preserving existing Facebook text settings and keeping media delivery and
-   Facebook media publishing disabled.
-3. Test actual immutable image/video previews against the connected real account.
+2. Test production ChatGPT imports and actual immutable image/video previews
+   against the connected real account, with media writes and delivery disabled.
    Isolated staging mock accounts intentionally cannot use the durable publisher;
    this safeguard has not been bypassed.
-4. Review and authorize the narrow signed media GET/HEAD route, verify external
+3. Review and authorize the narrow signed media GET/HEAD route, verify external
    signed downloads and ranges, and verify expired/tampered URL rejection.
-5. Obtain explicit authorization for exact live Facebook image and video test
+4. Obtain explicit authorization for exact live Facebook image and video test
    publications, one at a time. Instagram remains disabled. No real media was
    published in this phase's completed checks.
