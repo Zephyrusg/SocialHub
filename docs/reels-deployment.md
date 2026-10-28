@@ -8,7 +8,9 @@ owner's actual ChatGPT read-only capability test passed. See the
 Facebook-Reel-only controlled test activation, retaining disabled Instagram,
 image and regular-video writes. The separately approved Facebook export-validation
 correction is also deployed.
-No live Reel test has been performed.
+The first live init/upload test passed; a separately approved finish-order fix
+is deployed so the existing upload can continue through the owner's authenticated
+plugin. Public delivery remains unverified. No administrative publish was performed.
 
 This procedure does not itself authorize future production changes or live Reel
 publication. Obtain explicit approval for the exact rollout/settings and each

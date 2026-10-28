@@ -82,27 +82,32 @@ and two additional regressions bring both WSL and isolated Docker suites to
 **462 passing tests**. The ARM64 patch source/default-gate/dependency check passed
 locally as well; no new package or ffprobe build is introduced.
 
-Deployment of this correction requires separate approval. The existing uploaded
-Reel must be resumed under its original immutable publication ID; never create a
-replacement or repeat its upload. Live public delivery remains unverified.
+The owner approved and deployed the correction with caller polling paused.
+Native ARM64 protocol checks passed. The same publication/video IDs, immutable
+hash and two saved init/upload attempts were preserved; environment, approval
+policy, credentials, schema and unrelated services stayed unchanged. A live
+GET-only interpretation now reports readiness for finish without modifying the
+checkpoint or publishing; the existing approval was still valid at verification.
+The owner resumes through the same authenticated plugin and publication ID.
+Never create a replacement or repeat its upload. Live public delivery remains unverified.
 
-## Runtime footprint after the validation patch
+## Runtime footprint after the finish-order patch
 
 | Measurement | Result |
 | --- | --- |
-| ARM64 compressed layer payload | 123,390,205 bytes / 117.7 MiB |
-| ARM64 uncompressed layer tar payload | 342,790,656 bytes / 326.9 MiB |
-| ARM64 exported gzip archive | 122,655,960 bytes / 117.0 MiB |
-| Production host Docker-reported image size | 123,400,719 bytes / 117.7 MiB |
-| WSL Docker/containerd reported resident image storage after unpacking | 480,870,927 bytes / 458.6 MiB; includes storage accounting beyond compressed content |
+| ARM64 compressed layer payload | 123,402,480 bytes / 117.7 MiB |
+| ARM64 uncompressed layer tar payload | 342,823,936 bytes / 326.9 MiB |
+| ARM64 exported gzip archive | 122,668,033 bytes / 117.0 MiB |
+| Production host Docker-reported image size | 123,413,392 bytes / 117.7 MiB |
+| WSL Docker/containerd reported resident image storage after unpacking | 480,940,944 bytes / 458.7 MiB; includes storage accounting beyond compressed content |
 | Idle application RSS, initial disposable WSL AMD64 runtime | 94.9 MiB |
 | Idle container working-set memory / CPU sample | 73.21 MiB / 0.14% |
 | Metadata validation wall time, synthetic 5.02-second MP4 | 0.1166 seconds |
 | Validation worker CPU time | 0.0356 CPU-seconds; about 30.5% of one core over that wall interval |
 | Worker lifecycle peak RSS (`RUSAGE_CHILDREN`) | 60.7 MiB; includes inherited parent/startup pages |
-| Native ARM64 application RSS after patch restart | 75.1 MiB; excludes PID-1 init wrapper |
-| Native ARM64 metadata validation wall / worker CPU time | 0.3336 seconds / 0.1425 CPU-seconds, about 42.7% of one core |
-| Native worker lifecycle peak RSS (`RUSAGE_CHILDREN`) | 71.1 MiB; includes inherited parent/startup pages |
+| Native ARM64 application RSS after patch restart | 86.2 MiB; excludes PID-1 init wrapper |
+| Native ARM64 metadata validation wall / worker CPU time | 0.3193 seconds / 0.1513 CPU-seconds, about 47.4% of one core |
+| Native worker lifecycle peak RSS (`RUSAGE_CHILDREN`) | 71.2 MiB; includes inherited parent/startup pages |
 | Runtime media/test executables/packages | ffprobe present; ffmpeg, pytest, Playwright and PyYAML absent |
 
 The image size metrics describe different representations; do not treat the
@@ -130,11 +135,15 @@ security/provenance concern. Do not describe it as a newly patched minimal build
 
 ## Remaining gates
 
-1. Fresh actual Flow MP4 import with a new idempotency key, followed by exact
-   caption/media/account preview review. Old import responses can lack the new metadata.
+1. Resume the already-uploaded test Reel using its existing publication ID and
+   original reviewed content. GET status, follow `next_action` for finish, then
+   poll for confirmed delivery. Do not re-import or create a replacement for this
+   test. Future clips need a fresh import key and exact preview review.
 2. Separately approved Instagram write-account allowlist expansion if its previews
    are needed; the Reel gate must remain off until separately authorized.
-3. Separate authorization for Facebook-only, Instagram-only and combined live tests.
+3. Explicit owner instructions for each new publication; separate Instagram and
+   combined test activation/authorization. The current Facebook test already has
+   its own exact, time-limited approval.
 4. Actual Instagram resumable-session eligibility for the existing app/login setup;
    GET-only permission evidence cannot prove this. Fail closed if refused.
 
