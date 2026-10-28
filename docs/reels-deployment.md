@@ -6,7 +6,9 @@ policy, credentials and database schema did not. Native ARM64 validation and the
 owner's actual ChatGPT read-only capability test passed. See the
 [validation report](reels-validation.md). The owner subsequently approved
 Facebook-Reel-only controlled test activation, retaining disabled Instagram,
-image and regular-video writes. No live Reel test has been performed.
+image and regular-video writes. The separately approved Facebook export-validation
+correction is also deployed.
+No live Reel test has been performed.
 
 This procedure does not itself authorize future production changes or live Reel
 publication. Obtain explicit approval for the exact rollout/settings and each

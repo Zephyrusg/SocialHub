@@ -2,8 +2,8 @@
 
 ## Results
 
-- Complete WSL suite: **457 passed**, 17.47 seconds.
-- Complete Docker suite: **457 passed**, 37.61 seconds, no network, read-only
+- Current WSL suite: **460 passed**, 17.56 seconds.
+- Current Docker suite: **460 passed**, 37.31 seconds, no network, read-only
   root, nonroot runtime user, dropped capabilities, 384 MiB RAM / half a CPU.
   Both runs retain three existing Alembic configuration deprecation warnings.
 - ARM64 and AMD64 runtime builds completed using the existing uv multi-stage
@@ -48,10 +48,16 @@ and duration checks. Three regression cases bring the source suite to
 The ARM64 patch image also passed the public-source/default-gate/dependency smoke
 check locally. The observed Flow metadata now passes Facebook validation
 offline and still fails Instagram's stricter subset. No video bytes are changed,
-remuxed or transcoded. Patch deployment requires separate approval; the initial
-production code remains the reviewed first release until that approval.
+remuxed or transcoded. The owner approved patch deployment, and it is now
+installed through Git with
+a SocialHub-only restart. Native source/metadata checks and a read-only validation
+of the actual retained Flow bytes pass. Facebook-Reel-only test activation is
+preserved; Instagram, images and regular videos remain disabled. Runtime settings,
+credentials, history, approval policy and schema are unchanged. No upload session
+or publication was created.
 
-The previous suite had 409 tests. The expanded suite adds 48 cases, including
+The previous suite had 409 tests. The first Reel release added 48 cases; the
+Facebook-specific correction adds three more, for 460 total. Coverage includes
 both binary upload contracts, strict session URI matching, format/metadata bounds,
 combined previews, independent results, permission failure, ambiguous uploads,
 ambiguous finish/publication, delayed permalinks, approval expiry, disabled-gate
@@ -59,23 +65,23 @@ polling, and ordinary-video compatibility. Existing Facebook text/image/video
 regressions continue to pass. Provider responses in these publishing tests are
 mocked; they do not establish live Reel acceptance.
 
-## Runtime footprint
+## Runtime footprint after the validation patch
 
 | Measurement | Result |
 | --- | --- |
-| ARM64 compressed layer payload | 123,373,660 bytes / 117.7 MiB |
-| ARM64 uncompressed layer tar payload | 342,723,072 bytes / 326.8 MiB |
-| ARM64 exported gzip archive | 122,643,372 bytes / 117.0 MiB |
-| Production host Docker-reported image size | 123,388,099 bytes / 117.7 MiB |
-| WSL Docker/containerd reported resident image storage after unpacking | 480,800,963 bytes / 458.5 MiB; includes storage accounting beyond compressed content |
-| Idle application RSS, disposable WSL AMD64 runtime | 94.9 MiB |
+| ARM64 compressed layer payload | 123,390,205 bytes / 117.7 MiB |
+| ARM64 uncompressed layer tar payload | 342,790,656 bytes / 326.9 MiB |
+| ARM64 exported gzip archive | 122,655,960 bytes / 117.0 MiB |
+| Production host Docker-reported image size | 123,400,719 bytes / 117.7 MiB |
+| WSL Docker/containerd reported resident image storage after unpacking | 480,870,927 bytes / 458.6 MiB; includes storage accounting beyond compressed content |
+| Idle application RSS, initial disposable WSL AMD64 runtime | 94.9 MiB |
 | Idle container working-set memory / CPU sample | 73.21 MiB / 0.14% |
 | Metadata validation wall time, synthetic 5.02-second MP4 | 0.1166 seconds |
 | Validation worker CPU time | 0.0356 CPU-seconds; about 30.5% of one core over that wall interval |
 | Worker lifecycle peak RSS (`RUSAGE_CHILDREN`) | 60.7 MiB; includes inherited parent/startup pages |
-| Native ARM64 application RSS / idle CPU after restart | 45.4 MiB / 0.5% of one core over two seconds; cold process sample |
-| Native ARM64 metadata validation wall / worker CPU time | 0.2864 seconds / 0.1288 CPU-seconds, about 45.0% of one core |
-| Native worker lifecycle peak RSS (`RUSAGE_CHILDREN`) | 71.3 MiB; includes inherited parent/startup pages |
+| Native ARM64 application RSS after patch restart | 75.1 MiB; excludes PID-1 init wrapper |
+| Native ARM64 metadata validation wall / worker CPU time | 0.3336 seconds / 0.1425 CPU-seconds, about 42.7% of one core |
+| Native worker lifecycle peak RSS (`RUSAGE_CHILDREN`) | 71.1 MiB; includes inherited parent/startup pages |
 | Runtime media/test executables/packages | ffprobe present; ffmpeg, pytest, Playwright and PyYAML absent |
 
 The image size metrics describe different representations; do not treat the
@@ -103,8 +109,8 @@ security/provenance concern. Do not describe it as a newly patched minimal build
 
 ## Remaining gates
 
-1. Approval/deployment of the tested Facebook export-validation fix, followed by
-   fresh actual Flow MP4 import under the new metadata checks and preview review.
+1. Fresh actual Flow MP4 import with a new idempotency key, followed by exact
+   caption/media/account preview review. Old import responses can lack the new metadata.
 2. Separately approved Instagram write-account allowlist expansion if its previews
    are needed; the Reel gate must remain off until separately authorized.
 3. Separate authorization for Facebook-only, Instagram-only and combined live tests.
@@ -113,4 +119,6 @@ security/provenance concern. Do not describe it as a newly patched minimal build
 
 See [workflow/protocol details](reels.md) and [deployment/rollback](reels-deployment.md).
 Exact source/image checksums, private paths and operational evidence remain in
-ignored `private/`. The code-only deployment is complete; live Reel acceptance is not.
+ignored `private/`. The code and Facebook export-validation patch are deployed;
+Facebook-Reel-only controlled testing is enabled. Actual live Reel acceptance
+remains pending.
