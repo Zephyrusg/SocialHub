@@ -1,7 +1,10 @@
-# Next planned work: Feature Flag Management UI
+# Feature Flag Management UI — implementation and future convention
 
-Status: proposed; no UI implementation or production activation is included in
-the Facebook Reel acceptance follow-up. Prioritize this before Instagram live tests.
+Status: implemented in the existing Settings page. The design below records the
+original plan; see [feature flags](feature-flags.md) for actual behavior and the
+owner's convention for future optional features. Implemented features should
+arrive available but explicitly off after an approved rollout, so the owner can
+enable them independently without Codex or a restart.
 
 The owner's AI disclosure request takes priority over this UI. Implement the
 [Reel disclosure preference](ai-disclosure.md) first; add its default to the

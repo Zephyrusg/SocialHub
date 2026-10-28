@@ -78,6 +78,18 @@ No switch listed as implemented requires a restart when changed through Settings
 Tool registration is stable: an already connected ChatGPT client sees a disabled
 feature's safe error rather than needing a new plugin connection.
 
+### Convention for future features
+
+Every new optional implemented capability should have an owner-controlled toggle
+in this same section. Following an approved deployment it should be **available
+but explicitly off**, ready for the administrator to enable without Codex or a
+restart. Seed the off preference before raising its deployment ceiling; exposing
+the control should be part of that rollout, not a separate follow-up task.
+Use the existing persistence, revision, audit and authorization mechanisms.
+Document any technical exception that requires a restart. This convention does
+not authorize deployments, social posts, extra accounts or changes to fundamental
+security controls. Unsupported functionality remains unavailable.
+
 The following remain operator-managed and require the existing controlled
 configuration/deployment procedure, usually a SocialHub-only restart:
 
@@ -132,5 +144,6 @@ A local ARM64 emulation smoke test verified exact application source hashes,
 dynamic persistent import switches, safe write defaults and absence of FFmpeg
 encoding/browser/test dependencies. No new production dependency was added.
 
-These results do not claim production acceptance: no production service, feature
-value, identity configuration or social content was changed by this phase.
+These development checks did not modify production. Subsequent approved rollout
+and configuration changes are recorded separately in ignored operational records;
+the development results are not evidence of a live social-media publication.
