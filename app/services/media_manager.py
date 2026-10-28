@@ -11,6 +11,7 @@ import math
 import sys
 import tempfile
 import shutil
+from fractions import Fraction
 from datetime import timedelta
 from uuid import uuid4
 from urllib.parse import urlencode
@@ -20,8 +21,18 @@ from sqlalchemy.exc import IntegrityError
 from app.core import HubError
 from app.database.models import Media, utcnow
 from app.services.video_probe import probe_command
+from app.services.mp4_layout import mp4_layout
 
 Image.MAX_IMAGE_PIXELS = 40_000_000
+
+
+def optional_probe_number(value, *, rate=False):
+    """Unknown extra Reel metadata must not break existing regular-video imports."""
+    try:
+        number = float(Fraction(value)) if rate else int(value)
+        return number if math.isfinite(number) else 0
+    except (ValueError, TypeError, ZeroDivisionError, OverflowError):
+        return 0
 
 
 class MediaManager:
@@ -72,10 +83,20 @@ class MediaManager:
                     or not math.isfinite(duration) or not 0 < duration <= 600
                     or not 1 <= min(video['width'], video['height']) <= max(video['width'], video['height']) <= 4096):
                 raise ValueError()
-            return 'video/mp4', {'validated': True, 'width': video['width'], 'height': video['height'], 'duration': duration, 'video_codec': 'h264', 'audio_codecs': audio, 'format': 'MP4'}
+            try:
+                layout = mp4_layout(path)
+            except ValueError:
+                layout = {'fast_start': False, 'has_edit_list': True}
+            details = {'frame_rate': optional_probe_number(video.get('r_frame_rate'), rate=True),
+                'pixel_format': video.get('pix_fmt'), 'field_order': video.get('field_order'),
+                'video_bit_rate': optional_probe_number(video.get('bit_rate')),
+                'audio_details': [{'sample_rate': optional_probe_number(s.get('sample_rate')), 'channels': optional_probe_number(s.get('channels')),
+                                   'bit_rate': optional_probe_number(s.get('bit_rate'))} for s in data['streams'] if s.get('codec_type') == 'audio'],
+                **layout}
+            return 'video/mp4', {'validated': True, 'width': video['width'], 'height': video['height'], 'duration': duration, 'video_codec': 'h264', 'audio_codecs': audio, 'format': 'MP4', **details}
         except FileNotFoundError:
             raise HubError('media_validator_unavailable', 'ffprobe is required for video validation; use the Docker runtime') from None
-        except (subprocess.SubprocessError, ValueError, KeyError, StopIteration, TypeError):
+        except (subprocess.SubprocessError, ValueError, KeyError, StopIteration, TypeError, ZeroDivisionError, OverflowError, OSError):
             raise HubError('invalid_media', 'MP4 must contain H.264 video and optional AAC audio, with duration at most ten minutes') from None
 
     def save(self, temporary_path, principal='local-owner', *, consume=False):

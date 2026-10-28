@@ -84,12 +84,13 @@ async def test_poll_timeout_is_identified_as_read_only():
     assert error.value.retryable and error.value.diagnostics['mutation_attempted'] is False
 
 
-async def test_facebook_reel_real_multistage_contract():
+async def test_facebook_reel_real_multistage_contract(tmp_path):
     seen=[]
     def handler(r):
         seen.append(r)
         if r.url.host=='rupload.facebook.com':
-            assert r.headers['file_url'].startswith('https://media.example.test/')
+            assert 'file_url' not in r.headers
+            assert r.content == b'synthetic-video'
             assert r.headers['Authorization']=='OAuth synthetic'
             return httpx.Response(200,json={'success':True})
         if r.method=='POST' and b'upload_phase=start' in r.content:
@@ -97,11 +98,14 @@ async def test_facebook_reel_real_multistage_contract():
         if r.method=='POST' and b'upload_phase=finish' in r.content:
             assert b'video_state=PUBLISHED' in r.content
             return httpx.Response(200,json={'success':True})
-        return httpx.Response(200,json={'id':'123','status':{'video_status':'ready','publishing_phase':{'status':'complete'}},'permalink_url':'https://www.facebook.com/reel/123'})
+        return httpx.Response(200,json={'id':'123','status':{'video_status':'ready','uploading_phase':{'status':'complete'},'processing_phase':{'status':'complete'},'publishing_phase':{'status':'complete' if any(b'upload_phase=finish' in x.content for x in seen) else 'not_started'}},'permalink_url':'https://www.facebook.com/reel/123'})
     a,aid=adapter('facebook',handler)
+    from hashlib import sha256
+    path=tmp_path/'video'; path.write_bytes(b'synthetic-video')
+    req=dict(request('reel'),_media_path=str(path),_media_size=15,_media_sha256=sha256(path.read_bytes()).hexdigest())
     checkpoint={}
-    for _ in range(4):
-        result=await a.step(aid,request('reel'),checkpoint)
+    for _ in range(5):
+        result=await a.step(aid,req,checkpoint)
         checkpoint=result['checkpoint']
     assert result['state']=='succeeded'
     assert sum(r.method=='POST' for r in seen)==3

@@ -8,7 +8,7 @@ def probe_command(path):
     return ['ffprobe', '-v', 'error', '-protocol_whitelist', 'file', '-f', 'mov',
             '-enable_drefs', '0', '-use_absolute_path', '0', '-threads', '1',
             '-max_alloc', '16777216', '-probesize', '5000000', '-analyzeduration', '5000000',
-            '-show_entries', 'stream=codec_type,codec_name,width,height:format=duration,format_name',
+            '-show_entries', 'stream=codec_type,codec_name,width,height,r_frame_rate,pix_fmt,field_order,bit_rate,sample_rate,channels:format=duration,format_name',
             '-of', 'json', str(path)]
 
 

@@ -59,7 +59,7 @@ For the container test suite, including the bundled ffprobe validator:
 
 ```bash
 docker build --target test -t socialhub:test .
-docker run --rm --no-healthcheck --tmpfs /tmp:size=64m,mode=1777 socialhub:test
+docker run --rm --no-healthcheck --tmpfs /tmp:size=256m,mode=1777 socialhub:test
 ```
 
 The Python tests use temporary databases and fake API transports; they do not require real Meta credentials or publish social content. Host-side video tests may skip when ffprobe is unavailable; the Docker test target includes it.
@@ -67,6 +67,8 @@ The Python tests use temporary databases and fake API transports; they do not re
 Acknowledged Meta deliveries finalize through GET-only metadata refresh; status polling does not publish again. See [delivery finalization](docs/delivery-finalization.md).
 
 Phase 3D adds guarded ChatGPT attachment import, expiring private media and Facebook image/video workflows. Actual PNG and Google Flow MP4 imports/previews, signed external downloads and controlled live image/video publications have passed. Media publishing remains feature-gated; see the [validation report](docs/facebook-media-validation.md), [video processing](docs/facebook-video-live.md), [timeout reconciliation](docs/facebook-media-timeout.md) and [Facebook media](docs/facebook-media.md).
+
+[Native Facebook and Instagram Reels](docs/reels.md) extend the same workflow: import one MP4, review a Facebook/Instagram/combined preview, then explicitly request publication. Local binary uploads and independent platform checkpoints are implemented and tested with mocked Meta responses. Production rollout and live Reel tests require separate approval; see the [deployment and rollback plan](docs/reels-deployment.md).
 
 Documentation: [development](docs/development.md), [deployment](docs/deployment.md), [setup administration](docs/administration.md), and [security boundaries](docs/security.md).
 

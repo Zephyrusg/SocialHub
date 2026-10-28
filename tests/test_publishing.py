@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from io import BytesIO
@@ -46,7 +47,7 @@ async def publisher(sessions, tmp_path):
     from cryptography.fernet import Fernet
     s = Settings(_env_file=None, database_url='sqlite://', encryption_key=Fernet.generate_key().decode(),
         local_token='a'*64, meta_app_id='12345', meta_app_secret='fake-app-secret', meta_live_reads=True,
-        publishing_enabled=True, facebook_media_publishing_enabled=True, meta_live_writes=True,meta_write_account_ids=["pixelpapa-facebook","pixelpapa-instagram"], media_root=str(tmp_path / 'media'), media_public_base_url='https://media.example.test')
+        publishing_enabled=True, facebook_media_publishing_enabled=True, instagram_reels_publishing_enabled=True, meta_live_writes=True,meta_write_account_ids=["pixelpapa-facebook","pixelpapa-instagram"], media_root=str(tmp_path / 'media'), media_public_base_url='https://media.example.test')
     await MetaOAuth(s, sessions, httpx.MockTransport(MetaFixture())).connect('long-user')
     calls = []
     adapters = {p: FakeAdapter(p, calls) for p in ['facebook', 'instagram']}
@@ -152,10 +153,12 @@ async def test_concurrent_execution_claim(publisher):
     assert len(calls) == 1
 
 
+@pytest.mark.skipif(not shutil.which('ffprobe'), reason='Reel fixture metadata requires the prebuilt ffprobe in the Docker test target')
 async def test_partial_failure_is_not_success(publisher, tmp_path):
     service, adapters, calls, _ = publisher
-    asset = image_asset(service, tmp_path)
-    preview = await prepare(service, accounts=['pixelpapa-facebook','pixelpapa-instagram'], content_type='image', media_ids=[asset['id']])
+    service.settings.facebook_media_allowed_types = ['reel']
+    asset = service.media.save(Path('tests/fixtures/reel-h264-aac-5s.mp4'), 'alice')
+    preview = await prepare(service, accounts=['pixelpapa-facebook','pixelpapa-instagram'], content_type='reel', media_ids=[asset['id']])
     approve(service, preview)
     adapters['instagram'].fail = HubError('permission_denied', 'Permission changed')
     first = await service.execute('alice', ['socialhub:publish'], preview['publication_id'])

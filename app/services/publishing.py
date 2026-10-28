@@ -13,6 +13,7 @@ from app.security.tokens import TokenVault
 from app.connectors.meta import GraphClient, FacebookConnector, InstagramConnector
 from app.connectors.meta_policy import capabilities
 from app.connectors.publishing import MetaPublishingConnector
+from app.connectors.reels import REEL_READ_STAGES, REEL_UPLOAD_STAGES, REEL_READY_STAGES
 from app.services.approval_policy import ApprovalPolicy
 from app.services.write_access import require_write_accounts
 from app.services.administration import require_publisher, effective_settings
@@ -108,9 +109,43 @@ class PublishingService:
         return item
 
     def media_write_allowed(self, request):
-        return (not request['media_ids'] or 'pixelpapa-facebook' not in request['account_ids']
-                or (self.settings.facebook_media_publishing_enabled and self.settings.media_delivery_enabled
-                    and request['content_type'] in self.settings.facebook_media_allowed_types))
+        if not request['media_ids']:
+            return True
+        for aid in request['account_ids']:
+            if aid == 'pixelpapa-facebook':
+                if not self.settings.facebook_media_publishing_enabled or request['content_type'] not in self.settings.facebook_media_allowed_types:
+                    return False
+                if request['content_type'] != 'reel' and not self.settings.media_delivery_enabled:
+                    return False
+            if aid == 'pixelpapa-instagram':
+                # Adding Instagram to the account allowlist must not activate images too.
+                if request['content_type'] != 'reel' or not self.settings.instagram_reels_publishing_enabled:
+                    return False
+        return True
+
+    @staticmethod
+    def refreshable(target, request):
+        stage = target['checkpoint'].get('stage')
+        if target['state'] in {'processing', 'retryable'} and stage in {'delivered', 'video_processing'}:
+            return True
+        return (request['content_type'] == 'reel'
+                and ((target['state'] in {'processing', 'retryable'} and stage in REEL_READ_STAGES)
+                     or (target['state'] == 'uncertain' and stage in REEL_READ_STAGES | REEL_UPLOAD_STAGES | REEL_READY_STAGES)))
+
+    @staticmethod
+    def next_action(target):
+        if target.state in {'succeeded', 'failed'}:
+            return 'none'
+        if target.state == 'sending':
+            return 'wait_for_active_claim'
+        stage = target.checkpoint.get('stage')
+        if target.state == 'uncertain':
+            if stage == 'ig_reel_ready' or stage not in REEL_READ_STAGES | REEL_UPLOAD_STAGES | {'fb_reel_ready'}:
+                return 'manual_reconciliation'
+            return 'poll_status'
+        if stage in REEL_READ_STAGES | {'delivered', 'video_processing'}:
+            return 'poll_status'
+        return 'execute_next_step'
 
     def review(self, publication_id, principal):
         with self.sessions() as db:
@@ -136,6 +171,7 @@ class PublishingService:
                 'approval_channel': approval.channel if approval else None,
                 'independent_owner_approval': bool(approval and approval.channel in {'owner_cli', 'owner_portal'} and approval.expires_at > self.clock()),
                 'targets': [{'target_id': t.id, 'account_id': t.account_id, 'state': t.state,
+                    'next_action': self.next_action(t),
                     'delivery_confirmed': t.state == 'succeeded' or t.checkpoint.get('stage') == 'delivered',
                     'checkpoint': {k: v for k, v in t.checkpoint.items() if k in {'stage', 'remote_id', 'container_id', 'polls'}},
                     'result': t.result, 'error': {'code': t.error_code, 'message': t.error_message} if t.error_code else None,
@@ -264,10 +300,9 @@ class PublishingService:
         current = self.review(publication_id, principal)
         require_write_accounts(self.settings, current['preview']['request']['account_ids'])
         if not self.media_write_allowed(current['preview']['request']):
-            raise HubError('facebook_media_publishing_disabled', 'Facebook media publishing is not activated; the text workflow and prepared preview are preserved')
+            raise HubError('facebook_media_publishing_disabled' if 'pixelpapa-facebook' in current['preview']['request']['account_ids'] else 'instagram_reels_publishing_disabled', 'Media publishing is not activated for every selected target; the prepared preview is preserved')
         for target in current['targets']:
-            if (target['state'] in {'processing', 'retryable'}
-                    and target['checkpoint'].get('stage') in {'delivered', 'video_processing'}
+            if (self.refreshable(target, current['preview']['request'])
                     and isinstance(self.context(target['account_id'], execute=False)[2], MetaPublishingConnector)):
                 # Acknowledged work needs only status reads, not another claim,
                 # source-file check, upload URL or publication attempt.
@@ -286,10 +321,15 @@ class PublishingService:
                 if not caps.get(operation):
                     raise HubError('permission_denied', 'Account permission or Page task no longer permits this operation')
                 for asset in payload['assets']:
-                    self.media.path(asset['id'], asset['sha256'])
-                    self.media.reserve_delivery(asset['id'])
-                    # Metadata participates in the preview hash; on-disk bytes are rechecked before each step.
-                    request['media_url'] = self.media.temporary_url(asset['id'], asset['sha256'])
+                    if request['content_type'] == 'reel':
+                        if not checkpoint or checkpoint.get('stage') in REEL_UPLOAD_STAGES:
+                            request['_media_path'] = str(self.media.path(asset['id'], asset['sha256'])[0])
+                            self.media.reserve_delivery(asset['id'])
+                            request['_media_sha256'], request['_media_size'] = asset['sha256'], asset['size']
+                    else:
+                        self.media.path(asset['id'], asset['sha256'])
+                        self.media.reserve_delivery(asset['id'])
+                        request['media_url'] = self.media.temporary_url(asset['id'], asset['sha256'])
                 await adapter.validate(account.remote_id, request, payload['assets'])
                 sent = True  # From here an exception can mean an ambiguous external outcome.
                 outcome = await adapter.step(account.remote_id, request, checkpoint)
@@ -311,16 +351,15 @@ class PublishingService:
         return await self.refresh_status(publication_id, principal)
 
     async def refresh_status(self, publication_id, principal):
-        """Refresh only durable delivered checkpoints; no claims or Meta mutations."""
+        """GET-only delivery/processing reconciliation; never uploads or finishes a Reel."""
         preview = self.review(publication_id, principal)
         for snapshot in preview['targets']:
-            if (snapshot['state'] not in {'processing', 'retryable'}
-                    or snapshot['checkpoint'].get('stage') not in {'delivered', 'video_processing'}):
+            if not self.refreshable(snapshot, preview['preview']['request']):
                 continue
             with self.sessions() as db:
                 current = db.get(PublicationTarget, snapshot['target_id'])
                 if (not current or current.state != snapshot['state'] or current.lease_token is not None
-                        or current.checkpoint.get('stage') not in {'delivered', 'video_processing'}):
+                        or not self.refreshable(dict(state=current.state, checkpoint=current.checkpoint), preview['preview']['request'])):
                     continue
                 if current.next_attempt_at and current.next_attempt_at > self.clock():
                     continue
@@ -329,7 +368,11 @@ class PublishingService:
                 account, _, adapter = self.context(snapshot['account_id'], execute=False)
                 if not isinstance(adapter, MetaPublishingConnector):
                     continue
-                outcome = await adapter.refresh_delivery(account.remote_id, preview['preview']['request'], checkpoint)
+                if preview['preview']['request']['content_type'] == 'reel' and checkpoint.get('stage') != 'delivered':
+                    outcome = await adapter.reel_refresh(account.remote_id, preview['preview']['request'], checkpoint,
+                        uncertain=snapshot['state'] == 'uncertain')
+                else:
+                    outcome = await adapter.refresh_delivery(account.remote_id, preview['preview']['request'], checkpoint)
                 error = None
             except HubError as caught:
                 error = caught
@@ -344,17 +387,23 @@ class PublishingService:
                 if error is not None:
                     target.error_code, target.error_message = error.code, error.message[:256]
                     target.next_attempt_at = self.clock() + timedelta(seconds=60)
-                    if checkpoint.get('stage') == 'video_processing' and error.code == 'media_processing_failed':
+                    if error.code == 'media_processing_failed':
                         target.state, target.next_attempt_at = 'failed', None
                     # Keep the acknowledgement; a missing permalink is not a failed post.
                     continue
                 if outcome['state'] == 'processing':
-                    target.state = 'processing'
+                    target.state = 'uncertain' if outcome.get('uncertain') else 'processing'
                     target.checkpoint = outcome['checkpoint']
-                    target.error_code, target.error_message = None, None
+                    if not outcome.get('uncertain'):
+                        target.error_code, target.error_message = None, None
                     target.next_attempt_at = self.clock() + timedelta(seconds=outcome.get('retry_after', 60))
+                    if checkpoint.get('stage') != target.checkpoint.get('stage'):
+                        db.add(Audit(subject=preview['principal'], operation='reconcile_publication_stage', account_id=target.account_id,
+                            outcome=target.state, details={'publication_id': publication_id, 'target_id': target.id,
+                                'stage': target.checkpoint.get('stage'), 'mutation_attempted': False}))
                     continue
                 target.state, target.result = 'succeeded', outcome['result']
+                target.checkpoint = outcome.get('checkpoint', checkpoint)
                 target.error_code, target.error_message, target.next_attempt_at = None, None, None
                 self.remember_post(db, publication_id, target)
                 db.add(Audit(subject=preview['principal'], operation='finalize_publication', account_id=target.account_id,
@@ -382,7 +431,11 @@ class PublishingService:
             target.lease_token, target.lease_until = None, None
             delay = outcome.get('retry_after', 0)
             target.next_attempt_at = self.clock() + timedelta(seconds=delay) if delay else None
-            details = {'publication_id': publication_id, 'target_id': target.id, 'error_code': target.error_code, 'remote_id': target.result.get('remote_id')}
+            details = {'publication_id': publication_id, 'target_id': target.id, 'error_code': target.error_code,
+                'stage': target.checkpoint.get('stage'),
+                'remote_id': target.result.get('remote_id') or target.checkpoint.get('remote_id')}
+            if target.checkpoint.get('container_id'):
+                details['container_id'] = target.checkpoint['container_id']
             if target.error_code == 'api_timeout' and outcome.get('timeout_phase') in {'connect', 'read', 'write', 'pool', 'unknown'}:
                 details['timeout_phase'] = outcome['timeout_phase']
             db.add(Audit(subject=principal, operation='execute_publication', account_id=target.account_id, outcome=target.state, details=details))

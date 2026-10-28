@@ -3,6 +3,7 @@ from typing import Protocol
 from urllib.parse import urlparse, urlsplit, urlunsplit
 import httpx
 from app.core import HubError
+from app.connectors.reels import ReelWorkflows, REEL_READ_STAGES
 
 
 def facebook_permalink(value):
@@ -28,7 +29,7 @@ class PublishingConnector(Protocol):
     async def step(self, account_id, request, checkpoint): ...
 
 
-class MetaPublishingConnector:
+class MetaPublishingConnector(ReelWorkflows):
     def __init__(self, connector):
         self.connector = connector
         self.platform = connector.platform
@@ -64,8 +65,10 @@ class MetaPublishingConnector:
             elif request['content_type'] in {'video', 'reel'}:
                 if asset['mime_type'] != 'video/mp4':
                     raise HubError('invalid_media', 'Video/Reel content requires a validated MP4 asset')
-                if request['content_type'] == 'reel' and (not 3 <= meta['duration'] <= 60 or abs(meta['width'] / meta['height'] - 9 / 16) > 0.02 or not 720 <= meta['width'] <= 1080):
-                    raise HubError('invalid_media', 'Supported Reels subset: H.264/AAC MP4, 9:16, width 720–1080, 3–60 seconds')
+                if request['content_type'] == 'reel':
+                    if len(request['text']) > 2200:
+                        raise HubError('invalid_content', 'Reel captions are limited to 2200 characters in this service')
+                    self.validate_reel(asset)
         if request['operation'] != 'publish':
             post = await self.connector.get_post(account_id, request['post_id'])
             if request['operation'] == 'update':
@@ -94,12 +97,16 @@ class MetaPublishingConnector:
             return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': state.get('permalink')}}
         fields = 'id,permalink' if self.platform == 'instagram' else ('id,link' if state.get('lookup_kind') == 'photo' else 'id,permalink_url')
         info = await self.read(state['remote_id'], {'fields': fields})
+        if request['content_type'] == 'reel' and not self.permalink(info):
+            return {'state': 'processing', 'checkpoint': state, 'retry_after': 60}
         return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': self.permalink(info)}}
 
     async def refresh_delivery(self, account_id, request, checkpoint):
         self.connector.check_account(account_id)
         if checkpoint.get('stage') == 'delivered':
             return await self.finalize_delivery(account_id, request, checkpoint)
+        if request['content_type'] == 'reel':
+            return await self.reel_refresh(account_id, request, checkpoint)
         if (self.platform != 'facebook' or request['operation'] != 'publish'
                 or request['content_type'] != 'video' or checkpoint.get('stage') != 'video_processing'):
             raise HubError('unsupported_operation', 'Only acknowledged Facebook video uploads or deliveries can be polled read-only')
@@ -131,10 +138,10 @@ class MetaPublishingConnector:
             edge = 'comments' if self.platform == 'facebook' else 'replies'
             response = await self.graph.mutate('POST', f"{request['comment_id']}/{edge}", {'message' if self.platform == 'facebook' else 'message': text})
             return self.delivered(self.remote_id(response))
+        if kind == 'reel' and state.get('stage') != 'ig_container':
+            return await self.reel_step(account_id, request, state)
         if self.platform == 'instagram':
             return await self.instagram(account_id, request, state)
-        if kind == 'reel':
-            return await self.facebook_reel(account_id, request, state)
         if state.get('stage') == 'video_processing':
             info = await self.read(state['remote_id'], {'fields': 'id,status,permalink_url'})
             status = (info.get('status') or {}).get('video_status')
@@ -174,45 +181,6 @@ class MetaPublishingConnector:
             return {'state': 'processing', 'checkpoint': state, 'retry_after': 60}
         response = await self.graph.mutate('POST', f'{account_id}/media_publish', {'creation_id': state['container_id']})
         return self.delivered(self.remote_id(response))
-
-    async def facebook_reel(self, account_id, request, state):
-        stage = state.get('stage')
-        if not stage:
-            response = await self.graph.mutate('POST', f'{account_id}/video_reels', {'upload_phase': 'start'})
-            video_id = str(response.get('video_id', ''))
-            upload_url = response.get('upload_url', '')
-            u = urlparse(upload_url)
-            if not video_id.isdigit() or u.scheme != 'https' or u.hostname != 'rupload.facebook.com' or u.port not in {None, 443} or u.username or u.password or u.query or u.fragment or not u.path.endswith('/' + video_id):
-                raise HubError('write_outcome_unknown', 'Meta returned an invalid upload session; reconcile before retrying')
-            return {'state': 'processing', 'checkpoint': {'stage': 'fb_reel_upload', 'remote_id': video_id, 'upload_url': upload_url}}
-        if stage == 'fb_reel_upload':
-            await self.upload_reel(state['upload_url'], request['media_url'])
-            return {'state': 'processing', 'checkpoint': {'stage': 'fb_reel_finish', 'remote_id': state['remote_id']}}
-        if stage == 'fb_reel_finish':
-            response = await self.graph.mutate('POST', f'{account_id}/video_reels', {'upload_phase': 'finish', 'video_id': state['remote_id'], 'video_state': 'PUBLISHED', 'description': request['text']})
-            if response.get('success') is not True:
-                raise HubError('write_outcome_unknown', 'Meta did not acknowledge Reel publication')
-            return {'state': 'processing', 'checkpoint': {'stage': 'video_processing', 'remote_id': state['remote_id']}, 'retry_after': 60}
-        info = await self.read(state['remote_id'], {'fields': 'id,status,permalink_url'})
-        status = info.get('status') or {}
-        if status.get('video_status') == 'error' or (status.get('publishing_phase') or {}).get('status') == 'error':
-            raise HubError('media_processing_failed', 'Meta Reel processing failed')
-        if (status.get('publishing_phase') or {}).get('status') != 'complete':
-            return {'state': 'processing', 'checkpoint': state, 'retry_after': 60}
-        return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': self.permalink(info)}}
-
-    async def upload_reel(self, upload_url, media_url):
-        # Never fetch an arbitrary upload URL or retry an ambiguous upload.
-        u = urlparse(upload_url)
-        if u.scheme != 'https' or u.hostname != 'rupload.facebook.com' or u.username or u.password or u.query or u.fragment or u.port not in {None, 443} or not u.path.startswith('/video-upload/'):
-            raise HubError('invalid_meta_upload', 'Refused untrusted Meta upload endpoint')
-        try:
-            async with httpx.AsyncClient(transport=self.graph.transport, timeout=30, follow_redirects=False) as client:
-                response = await client.post(upload_url, headers={'Authorization': 'OAuth ' + self.graph.token, 'file_url': media_url})
-                if response.status_code != 200 or response.json().get('success') is not True:
-                    raise HubError('write_outcome_unknown', 'Reel upload not acknowledged; reconcile before retrying')
-        except (httpx.RequestError, ValueError):
-            raise HubError('write_outcome_unknown', 'Reel upload outcome uncertain; reconcile before retrying') from None
 
     @staticmethod
     def remote_id(response):

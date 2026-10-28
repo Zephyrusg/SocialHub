@@ -42,7 +42,7 @@ def register_attachment_tools(mcp, settings, sessions):
               structured_output=True, meta={'openai/fileParams': ['file'],
                   'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish']}]})
     async def import_media(file: ChatGPTFile, idempotency_key: str) -> dict[str, Any]:
-        """Import a user-supplied ChatGPT image/MP4 attachment into private expiring storage, without publishing. Pass the returned media ID to prepare_publication with image/video content type. Use actual host file parameters, never guessed URLs or sandbox paths. A separate explicit user publication instruction is required."""
+        """Import a user-supplied ChatGPT image/MP4 attachment into private expiring storage, without publishing. Pass the returned media ID to prepare_publication with image/video/reel content type; one Reel asset can target both platforms. Use actual host file parameters, never guessed URLs or sandbox paths. A separate explicit user publication instruction is required."""
         return await invoke(file, key=idempotency_key)
 
     # SDK validation errors must not echo a capability URL from malformed input.

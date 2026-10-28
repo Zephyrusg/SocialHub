@@ -236,7 +236,7 @@ def create_server(settings=None):
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True), structured_output=True,
               meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish']}]})
     async def execute_publication(publication_id: Short) -> dict[str, Any]:
-        """Execute only an explicitly requested and reviewed immutable publication. Respect native ChatGPT write confirmation. The configured server policy independently enforces owner approval or tested client-policy reliance. Never retries uncertain outcomes blindly."""
+        """Execute only an explicitly requested and reviewed immutable publication. Respect native ChatGPT write confirmation. For Reels, each call advances at most one mutation per target; continue this same requested workflow after read-only status checks report a ready checkpoint. Observe retry_at. Never recreate or blindly retry uncertain targets. The configured policy enforces owner approval or authenticated client-policy reliance."""
         return await publication_call('execute', publication_id=publication_id)
 
     @mcp.tool(annotations=read, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read']}]})

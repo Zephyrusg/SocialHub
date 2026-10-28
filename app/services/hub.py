@@ -92,6 +92,10 @@ class Hub:
                         and caps.get('publish_post') and caps['live_writes_enabled'] and self.settings.facebook_media_publishing_enabled
                         and self.settings.media_delivery_enabled and self.settings.media_public_base_url
                         and kind in self.settings.facebook_media_allowed_types)
+                caps['publish_reel_enabled'] = bool(caps.get('publish_post') and caps['live_writes_enabled']
+                    and ((account.platform == 'facebook' and self.settings.facebook_media_publishing_enabled
+                          and 'reel' in self.settings.facebook_media_allowed_types)
+                         or (account.platform == 'instagram' and self.settings.instagram_reels_publishing_enabled)))
                 if account.platform == 'instagram' and account_type_source != 'api_returned':
                     caps['stories'] = False
             if operation == 'get_account_capabilities':

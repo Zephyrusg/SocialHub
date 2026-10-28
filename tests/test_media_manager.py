@@ -143,3 +143,21 @@ async def test_signed_delivery_http_head_expiry_tampering_and_ranges(tmp_path):
             assert (await client.get(signed,headers={'Range':'bytes=0-1,4-5'})).status_code==403
             assert (await client.get(signed,headers={'Range':f"bytes={asset['size']+1}-"})).status_code==416
             assert (await client.post(signed,content=b'not-an-upload')).status_code==405
+
+
+def test_unknown_extra_reel_metadata_does_not_break_regular_video_import(media, monkeypatch, tmp_path):
+    """Some valid MP4s don't report frame rate/bitrate; only Reel prep requires them."""
+    path = tmp_path / 'video.mp4'
+    path.write_bytes(Path('tests/fixtures/reel-h264-3s.mp4').read_bytes())
+    def fake_probe(*args, **kwargs):
+        kwargs['stdout'].write(json.dumps({'streams': [
+            {'codec_type': 'video', 'codec_name': 'h264', 'width': 720, 'height': 1280,
+             'r_frame_rate': '0/0', 'bit_rate': 'N/A'},
+            {'codec_type': 'audio', 'codec_name': 'aac', 'sample_rate': 'N/A', 'channels': 2}],
+            'format': {'duration': '3'}}).encode())
+    monkeypatch.setattr('app.services.media_manager.shutil.which', lambda _: '/synthetic/ffprobe')
+    monkeypatch.setattr('app.services.media_manager.subprocess.run', fake_probe)
+    asset = media.save(path, 'alice')
+    assert asset['mime_type'] == 'video/mp4'
+    assert asset['metadata']['frame_rate'] == asset['metadata']['video_bit_rate'] == 0
+    assert asset['metadata']['audio_details'][0]['sample_rate'] == 0

@@ -5,6 +5,11 @@ The implementation is feature-gated. Production text publishing and the existing
 the authorized production write allowlist. Real image/video publication requires
 separate operator authorization and controlled acceptance tests.
 
+Native `content_type="reel"` now has a separate development implementation for
+Facebook and Instagram, using direct private-file uploads rather than the hosted
+URL flow below. See [Reels](reels.md) for its platform gates, checkpoints and
+[deployment plan](reels-deployment.md). Live Reel acceptance remains pending.
+
 ## ChatGPT attachment transfer: verify before activation
 
 OpenAI documents explicit tool file inputs using `_meta["openai/fileParams"]`.
