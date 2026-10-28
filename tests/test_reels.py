@@ -331,3 +331,17 @@ async def test_read_adapter_cannot_upload_even_with_local_file():
     a.graph.allow_writes = False
     with pytest.raises(HubError) as error: await a.upload_reel_file('123', {})
     assert error.value.code == 'live_writes_disabled'
+
+
+@pytest.mark.parametrize('field,value', [('has_edit_list', True), ('fast_start', False), ('audio_bit_rate', 129000)])
+async def test_facebook_does_not_apply_instagram_container_or_audio_limits(publisher, field, value):
+    asset = publisher[0].media.save(Path('tests/fixtures/reel-h264-aac-5s.mp4'), 'alice')
+    if field == 'audio_bit_rate':
+        asset['metadata']['audio_details'][0]['bit_rate'] = value
+    else:
+        asset['metadata'][field] = value
+    fb, page = adapter('facebook', lambda r: pytest.fail('Validation must not contact Meta'))
+    ig, account = adapter('instagram', lambda r: pytest.fail('Validation must not contact Meta'))
+    await fb.validate(page, request('reel'), [asset])
+    with pytest.raises(HubError) as error: await ig.validate(account, request('reel'), [asset])
+    assert error.value.code == 'invalid_media'

@@ -1,7 +1,15 @@
-# Reel deployment and rollback plan — proposed, not applied
+# Reel deployment and rollback
 
-No production change or live Reel publication is authorized by this plan. Obtain
-explicit approval for the exact rollout/settings and then separately for each
+The owner-approved code-only rollout completed on 28 October 2026, with Reel
+publishing disabled. The application image changed; runtime settings, approval
+policy, credentials and database schema did not. Native ARM64 validation and the
+owner's actual ChatGPT read-only capability test passed. See the
+[validation report](reels-validation.md). The owner subsequently approved
+Facebook-Reel-only controlled test activation, retaining disabled Instagram,
+image and regular-video writes. No live Reel test has been performed.
+
+This procedure does not itself authorize future production changes or live Reel
+publication. Obtain explicit approval for the exact rollout/settings and each
 controlled Facebook, Instagram and combined live test. Existing production
 Facebook text publishing and `chatgpt_direct` remain unchanged.
 

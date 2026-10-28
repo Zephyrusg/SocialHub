@@ -2,7 +2,10 @@
 
 Reels reuse the existing imported media, immutable previews, approvals and
 independently checkpointed publication targets. Development tests use mocked Meta
-responses. **No live Reel acceptance test or production rollout has been performed.**
+responses. An owner-approved code-only production rollout is complete with Reel
+and Instagram publishing initially disabled. The owner subsequently authorized
+Facebook-Reel-only test activation; Instagram, images and regular videos remain
+disabled. **No live Reel acceptance test has been performed.**
 Facebook text, image and regular `content_type="video"` publishing remain separate.
 
 ## ChatGPT workflow
@@ -78,17 +81,18 @@ available separately for previously implemented Facebook image/video publishing.
 
 The metadata-only ffprobe pipeline now retains frame rate, pixel format, scan
 mode, video bitrate and audio sample rate/channels/bitrate. A bounded MP4 box walk
-checks fast-start ordering and rejects edit lists for Reels. This does not decode
+checks fast-start ordering and edit lists. Those restrictions apply to Instagram;
+Facebook does not inherit Instagram's container/audio-bitrate constraints. This does not decode
 frames, transcode, re-encode or add an encoder to the runtime.
 
 | Property | Facebook Reel | Instagram Reel |
 | --- | --- | --- |
-| Container/codecs | Fast-start MP4, H.264/yuv420p; optional AAC | Same supported subset |
+| Container/codecs | MP4, H.264/yuv420p; optional AAC; edit lists accepted | Fast-start MP4 without edit lists, H.264/yuv420p; optional AAC |
 | Shape | Exact 9:16; width 720–1080 | Same supported subset |
 | Frame rate | 23–60 fps, progressive/unspecified scan metadata | Same supported subset |
 | Duration | 4–60 seconds | 3–600 seconds (existing ingestion ceiling) |
 | Video bitrate | At most 25 Mbps | At most 25 Mbps |
-| Audio | At most 48 kHz, mono/stereo, at most 128 kbps | Same supported subset |
+| Audio | At most 48 kHz, mono/stereo; positive reported bitrate | At most 48 kHz, mono/stereo, at most 128 kbps |
 | Caption | At most 2200 characters | At most 2200 characters |
 | Bytes | Existing configured upload limit; default 100 MiB | Same service limit, below Meta's documented 1 GB maximum |
 

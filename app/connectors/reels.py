@@ -29,12 +29,15 @@ class ReelWorkflows:
                 or not 23 <= m.get('frame_rate', 0) <= 60
                 or m.get('pixel_format') != 'yuv420p'
                 or m.get('field_order') not in {'progressive', 'unknown'}
-                or not m.get('fast_start') or m.get('has_edit_list', True)
+                or (self.platform == 'instagram' and (not m.get('fast_start') or m.get('has_edit_list', True)))
                 or not 0 < m.get('video_bit_rate', 0) <= 25_000_000
                 or len(m.get('audio_details', [])) != len(m.get('audio_codecs', []))
                 or any(not 0 < a.get('sample_rate', 0) <= 48000 or a.get('channels') not in {1, 2}
-                       or not 0 < a.get('bit_rate', 0) <= 128000 for a in m.get('audio_details', []))):
-            raise HubError('invalid_media', f'{self.platform.title()} Reel subset: fast-start MP4 without edit lists, progressive H.264/yuv420p, optional AAC up to 48 kHz/128 kbps, 9:16, width 720–1080, 23–60 fps, {minimum}–{maximum} seconds. Re-import older media to obtain full validation metadata')
+                       or not 0 < a.get('bit_rate', 0)
+                       or (self.platform == 'instagram' and a['bit_rate'] > 128000)
+                       for a in m.get('audio_details', []))):
+            extra = '; Instagram additionally requires fast-start without edit lists and AAC up to 128 kbps' if self.platform == 'instagram' else ''
+            raise HubError('invalid_media', f'{self.platform.title()} Reel subset: MP4, progressive H.264/yuv420p, optional mono/stereo AAC up to 48 kHz, 9:16, width 720–1080, 23–60 fps, {minimum}–{maximum} seconds{extra}. Re-import older media if validation metadata is missing')
 
     def reel_upload_url(self, remote_id):
         if not isinstance(remote_id, str) or not remote_id.isascii() or not remote_id.isdigit():
