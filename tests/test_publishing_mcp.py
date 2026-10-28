@@ -36,6 +36,13 @@ async def test_mcp_prepare_approve_execute_and_legacy_preview(tmp_path,monkeypat
             await rpc('initialize',{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'pytest','version':'1'}})
             tools=await rpc('tools/list',{})
             names={t['name'] for t in tools['tools']}
+            descriptions={t['name']:t for t in tools['tools']}
+            executing=descriptions['execute_publication'];status_tool=descriptions['get_publication_status']
+            assert executing['annotations']['readOnlyHint'] is False and executing['annotations']['destructiveHint'] is True
+            assert 'at most one mutation' in executing['description'] and 'retry_at' in executing['description']
+            assert 'uncertain' in executing['description'] and 'same requested workflow' in executing['description']
+            assert status_tool['annotations']['readOnlyHint'] is True
+            assert 'GETs only' in status_tool['description'] and 'Never publishes' in status_tool['description']
             assert len(names)==19
             assert 'get_approval_requirements' in names
             assert not any('approve' in n or 'reconcile' in n for n in names)

@@ -4,8 +4,10 @@ Reels reuse the existing imported media, immutable previews, approvals and
 independently checkpointed publication targets. Development tests use mocked Meta
 responses. An owner-approved code-only production rollout is complete with Reel
 and Instagram publishing initially disabled. The owner subsequently authorized
-Facebook-Reel-only test activation; Instagram, images and regular videos remain
-disabled. **No live Reel acceptance test has been performed.**
+Facebook-Reel-only test activation. **The first live Facebook Reel acceptance
+test passed**, including persisted recovery without duplicate upload. Its temporary
+gate is disabled again; Instagram, images and regular videos remain disabled.
+See the [acceptance and authorized cleanup report](facebook-reel-live.md).
 Facebook text, image and regular `content_type="video"` publishing remain separate.
 
 ## ChatGPT workflow
@@ -29,6 +31,15 @@ Facebook text, image and regular `content_type="video"` publishing remain separa
 6. Report each platform's state, remote ID, error and final permalink. A successful
    target is never resent while the other target continues. On
    `manual_reconciliation`, stop mutations and inspect the existing remote outcome.
+
+| Returned value | Caller action |
+| --- | --- |
+| `execute_next_step` | Under the same valid explicit instruction, execute this existing publication ID; do not prepare a replacement |
+| `poll_status` | Read `get_publication_status`; this cannot upload, finish or republish |
+| Future `retry_at` | Wait until that time before the indicated next call; repeated early calls do not advance work |
+| `wait_for_active_claim` | Let the active send finish; do not dispatch another worker or reset its lease |
+| `manual_reconciliation` or uncertain outcome | Stop mutations and inspect the existing remote outcome; never blindly recreate/retry |
+| `none` / succeeded | Report the saved result; no further execute is needed, including after separately authorized deletion |
 
 One caption currently applies to both platforms. The immutable request and the
 per-target connector request are separate, allowing a future reviewed caption map

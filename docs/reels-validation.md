@@ -1,9 +1,9 @@
-# Reel development and code-only rollout validation — 28 October 2026
+# Reel development, rollout and Facebook acceptance — 28 October 2026
 
 ## Results
 
-- Current WSL suite: **462 passed**, 17.90 seconds.
-- Current Docker suite: **462 passed**, 40.55 seconds, no network, read-only
+- Current WSL suite: **478 passed**, 19.58 seconds.
+- Current Docker suite: **478 passed**, 42.91 seconds, no network, read-only
   root, nonroot runtime user, dropped capabilities, 384 MiB RAM / half a CPU.
   Both runs retain three existing Alembic configuration deprecation warnings.
 - ARM64 and AMD64 runtime builds completed using the existing uv multi-stage
@@ -28,7 +28,10 @@
   Facebook writes allowed, and image/video/Reel capability gates all false.
   General live writes are true because the existing Facebook text workflow remains
   enabled. Only read-only tools were called.
-- No upload session, Reel publication, edit or deletion was performed against Meta.
+- Deployment verification used GETs only. The subsequent explicitly authorized
+  Facebook Reel publication succeeded, was independently verified through Meta,
+  and was separately deleted at the owner's request. No replacement or additional
+  publication was created. See [live acceptance](facebook-reel-live.md).
 
 ## Facebook export validation follow-up
 
@@ -89,7 +92,10 @@ policy, credentials, schema and unrelated services stayed unchanged. A live
 GET-only interpretation now reports readiness for finish without modifying the
 checkpoint or publishing; the existing approval was still valid at verification.
 The owner resumes through the same authenticated plugin and publication ID.
-Never create a replacement or repeat its upload. Live public delivery remains unverified.
+Never create a replacement or repeat its upload. The owner subsequently resumed
+this same publication successfully: Meta confirmed public delivery, final history
+was succeeded/delivered and the mutation count remained three. Authorized cleanup
+then removed the remote test object while preserving this history.
 
 ## Runtime footprint after the finish-order patch
 
@@ -133,22 +139,21 @@ static ffprobe still contains its vendor's broad linked feature/library set;
 this release does not reduce or independently clear that native binary's prior
 security/provenance concern. Do not describe it as a newly patched minimal build.
 
-## Remaining gates
+## Remaining work and authorization boundaries
 
-1. Resume the already-uploaded test Reel using its existing publication ID and
-   original reviewed content. GET status, follow `next_action` for finish, then
-   poll for confirmed delivery. Do not re-import or create a replacement for this
-   test. Future clips need a fresh import key and exact preview review.
+1. [Feature Flag Management UI](feature-flag-management-plan.md) on the existing
+   Settings page is next, before Instagram live work. It is proposed, not implemented.
 2. Separately approved Instagram write-account allowlist expansion if its previews
-   are needed; the Reel gate must remain off until separately authorized.
-3. Explicit owner instructions for each new publication; separate Instagram and
-   combined test activation/authorization. The current Facebook test already has
-   its own exact, time-limited approval.
+   are needed; its Reel gate remains off until separately authorized.
+3. Explicit owner instructions and reviewed previews for each new publication;
+   separate Instagram/combined activation and live tests. This successful Facebook
+   test is not authorization for additional posts.
 4. Actual Instagram resumable-session eligibility for the existing app/login setup;
    GET-only permission evidence cannot prove this. Fail closed if refused.
 
 See [workflow/protocol details](reels.md) and [deployment/rollback](reels-deployment.md).
 Exact source/image checksums, private paths and operational evidence remain in
 ignored `private/`. The code and Facebook export-validation patch are deployed;
-Facebook-Reel-only controlled testing is enabled. Actual live Reel acceptance
-remains pending.
+the temporary Facebook Reel gate is disabled again. Facebook live acceptance
+passed; Instagram and combined live acceptance remain pending. Runtime code stayed
+unchanged during the test/documentation follow-up.

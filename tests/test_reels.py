@@ -28,6 +28,7 @@ class ReelMeta:
         self.upload_receiving = False
         self.reject_publish = None
         self.pending_publication = False
+        self.permalink_ready = True
 
     def __call__(self, r):
         platform = 'facebook' if '/video-upload/' in r.url.path or '101' in r.url.path or PAGE_ID in r.url.path else 'instagram'
@@ -65,7 +66,8 @@ class ReelMeta:
                   # Facebook finish initiates processing; it cannot complete beforehand.
                   'processing_phase': {'status': 'not_started' if platform not in self.published else 'in_progress' if self.processing else 'complete'},
                   'publishing_phase': {'status': 'complete' if platform in self.published and not self.pending_publication and not self.processing else 'in_progress' if platform in self.published else 'not_started'}}
-        return httpx.Response(200, json={'id': '101', 'status': status, 'permalink_url': '/reel/101/'})
+        return httpx.Response(200, json={'id': '101', 'status': status,
+            'permalink_url': '/reel/101/' if self.permalink_ready else None})
 
 
 async def setup_reels(publisher, accounts=None):
@@ -384,3 +386,95 @@ async def test_uncertain_facebook_finish_does_not_become_ready_again_when_proces
     a, aid = adapter('facebook', handler)
     state = await a.reel_refresh(aid, request('reel'), {'stage': 'fb_reel_ready', 'remote_id': '123'}, uncertain=True)
     assert state['checkpoint']['stage'] == 'fb_reel_publishing' and state['uncertain']
+
+
+@pytest.mark.parametrize('checkpoint', ['fb_reel_upload', 'fb_reel_processing', 'fb_reel_ready',
+    'fb_reel_publishing', 'delivered', 'succeeded'])
+async def test_process_restart_resumes_every_facebook_reel_checkpoint_without_duplicates(publisher, checkpoint):
+    from app.services.publishing import PublishingService
+    service, meta, preview, _, execute, poll = await setup_reels(publisher, ['pixelpapa-facebook'])
+    await execute()
+    if checkpoint != 'fb_reel_upload': await execute()
+    if checkpoint not in {'fb_reel_upload', 'fb_reel_processing'}: await poll()
+    if checkpoint in {'fb_reel_publishing', 'delivered', 'succeeded'}: await execute()
+    if checkpoint == 'delivered': meta.permalink_ready = False
+    if checkpoint in {'delivered', 'succeeded'}: await poll()
+    before = service.review(preview['publication_id'], 'alice')
+    assert (before['state'] == 'succeeded') if checkpoint == 'succeeded' else before['targets'][0]['checkpoint']['stage'] == checkpoint
+    # New coordinator and connectors; only the database and remote provider survive.
+    restarted = PublishingService(service.settings, service.sessions,
+        lambda account, execute: adapter(account.platform, meta)[0], clock=service.clock)
+    meta.permalink_ready = True
+    pid = preview['publication_id']
+    for _ in range(8):
+        publisher[3][0] += timedelta(seconds=61)
+        result = await restarted.refresh_status(pid, 'alice')
+        if result['state'] == 'succeeded': break
+        assert result['targets'][0]['state'] != 'uncertain'
+        if result['targets'][0]['next_action'] == 'execute_next_step':
+            await restarted.execute('alice', ['socialhub:publish'], pid)
+    assert result['state'] == 'succeeded' and result['request_hash'] == preview['request_hash']
+    assert result['targets'][0]['attempts'] == 3
+    counts = meta.calls.copy()
+    for _ in range(3): await restarted.execute('alice', ['socialhub:publish'], pid)
+    assert meta.calls == counts
+    assert meta.calls['facebook:start'] == meta.calls['facebook:upload'] == meta.calls['facebook:publish'] == 1
+    with service.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(Publication)) == 1
+        assert db.scalar(select(func.count()).select_from(Post)) == 1
+
+
+@pytest.mark.parametrize('stage', ['initial', 'fb_reel_upload', 'fb_reel_ready'])
+@pytest.mark.parametrize('provider_accepted', [False, True])
+async def test_expired_reel_mutation_lease_never_resends_unknown_outcome(publisher, stage, provider_accepted):
+    service, meta, preview, _, execute, poll = await setup_reels(publisher, ['pixelpapa-facebook'])
+    if stage != 'initial': await execute()
+    if stage == 'fb_reel_ready': await execute(); await poll()
+    tid = preview['targets'][0]['target_id']
+    claim = service.claim(preview['publication_id'], tid, 'alice')
+    assert claim  # Worker crashes after claim, before durably recording its outcome.
+    if provider_accepted and stage == 'initial': meta.calls['facebook:start'] += 1
+    if provider_accepted and stage == 'fb_reel_upload':
+        meta.uploaded.add('facebook'); meta.calls['facebook:upload'] += 1
+    if provider_accepted and stage == 'fb_reel_ready':
+        meta.published.add('facebook'); meta.calls['facebook:publish'] += 1
+    counts = {k: meta.calls[k] for k in ['facebook:start', 'facebook:upload', 'facebook:publish']}
+    publisher[3][0] += timedelta(minutes=6)
+    result = await execute()
+    if provider_accepted and stage == 'fb_reel_upload':
+        assert result['targets'][0]['checkpoint']['stage'] == 'fb_reel_ready'
+    elif provider_accepted and stage == 'fb_reel_ready':
+        assert result['state'] == 'succeeded'
+    else:
+        assert result['targets'][0]['state'] == 'uncertain'
+    for _ in range(2): await service.refresh_status(preview['publication_id'], 'alice')
+    assert {k: meta.calls[k] for k in counts} == counts  # No POST despite known remote ID.
+
+
+@pytest.mark.parametrize('stage', ['initial', 'fb_reel_upload', 'fb_reel_ready'])
+async def test_duplicate_execute_during_live_reel_lease_does_not_dispatch(publisher, stage):
+    service, meta, preview, _, execute, poll = await setup_reels(publisher, ['pixelpapa-facebook'])
+    if stage != 'initial': await execute()
+    if stage == 'fb_reel_ready': await execute(); await poll()
+    assert service.claim(preview['publication_id'], preview['targets'][0]['target_id'], 'alice')
+    counts = meta.calls.copy()
+    await execute(); await execute()
+    assert meta.calls == counts
+
+
+async def test_deleted_delivered_reel_remains_cached_and_cannot_be_republished(publisher):
+    service, meta, preview, _, execute, poll = await setup_reels(publisher, ['pixelpapa-facebook'])
+    await execute(); await execute(); await poll(); await execute()
+    assert (await poll())['state'] == 'succeeded'
+    with service.sessions.begin() as db:
+        target=db.get(PublicationTarget,preview['targets'][0]['target_id'])
+        target.result=dict(target.result,cleanup={'state':'deleted'})
+    def forbidden(r): pytest.fail('A delivered/deleted Reel must never contact Meta again')
+    service.connector_factory=lambda account,execute:adapter(account.platform,forbidden)[0]
+    for _ in range(3):
+        cached=await service.refresh_status(preview['publication_id'],'alice')
+        replay=await service.execute('alice',['socialhub:publish'],preview['publication_id'])
+        for result in [cached,replay]:
+            assert result['state']=='succeeded' and result['request_hash']==preview['request_hash']
+            assert result['targets'][0]['attempts']==3 and result['targets'][0]['next_action']=='none'
+            assert result['targets'][0]['result']['cleanup']['state']=='deleted'

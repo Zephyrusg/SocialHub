@@ -8,9 +8,11 @@ owner's actual ChatGPT read-only capability test passed. See the
 Facebook-Reel-only controlled test activation, retaining disabled Instagram,
 image and regular-video writes. The separately approved Facebook export-validation
 correction is also deployed.
-The first live init/upload test passed; a separately approved finish-order fix
-is deployed so the existing upload can continue through the owner's authenticated
-plugin. Public delivery remains unverified. No administrative publish was performed.
+The owner resumed the existing upload through the authenticated plugin after the
+finish-order correction; the [first live Facebook Reel test](facebook-reel-live.md)
+passed with three total mutation steps and no duplicate upload. The temporary
+Reel gate is disabled again. A separately authorized administrative cleanup deleted
+only that exact test object; succeeded history is retained. Instagram stays disabled.
 
 This procedure does not itself authorize future production changes or live Reel
 publication. Obtain explicit approval for the exact rollout/settings and each
