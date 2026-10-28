@@ -26,6 +26,7 @@ This is an evolving single-owner project. The current live-account allowlist is 
 - [Feature Flags in Settings](docs/feature-flags.md): persistent switches within deployment limits, with revisions, audit records and no restart for runtime changes.
 - Separate owner approval through an optional lightweight portal, with an administrative CLI fallback; setup does not require that portal.
 - Private media ingestion, image validation and metadata-only video checks.
+- An explicit [WSL helper for Instagram-compatible Reel copies](docs/instagram-media-normalization.md), preserving the video stream while correcting AAC bitrate and MP4 layout. Automatic conversion through ChatGPT is not yet available.
 - Automated tests for authentication, approval boundaries, account restrictions, replay protection and failure handling.
 
 Live Meta reads and narrowly authorized Facebook text, image and video tests have been verified. The image post's uncertain timeout was reconciled without retrying; the Flow video completed asynchronous processing and was deleted after verification as authorized. That does **not** mean every publishing/media operation is live-verified, or that normal public writes are enabled. Instagram publishing and broader management workflows still need separately authorized acceptance tests. Scheduling currently records mock jobs; there is no autonomous production publishing worker.
