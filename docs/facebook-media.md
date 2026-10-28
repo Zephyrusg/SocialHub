@@ -93,6 +93,13 @@ at the short stateless MCP request lifetime.
 ## Network and delivery security
 
 Only exact operator-reviewed download hosts are allowed (empty by default).
+ChatGPT may return different regional storage hosts for different attachments.
+Review each hostname observed in an authenticated probe and add it individually
+to `MEDIA_DOWNLOAD_HOSTS`; never allow `*.blob.core.windows.net` or infer trust
+from an Azure suffix. DNS and TLS checks establish the network destination, not
+proof that a file was issued by ChatGPT. Treat every file reference and its bytes
+as untrusted, even on an allowed host. Keep the observed host inventory and
+acceptance evidence in ignored operational notes, rather than public defaults.
 The receiver requires HTTPS without credentials, IP literals or fragments,
 rejects private/reserved/multicast DNS answers and pins a checked public address
 while retaining hostname/SNI certificate verification. Environment proxies,

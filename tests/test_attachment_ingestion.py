@@ -114,6 +114,31 @@ async def test_dns_rejects_mixed_public_private_answers(monkeypatch):
     with pytest.raises(HubError):await public_address(HOST)
 
 
+async def test_multiple_exact_regional_hosts_do_not_trust_blob_suffix(media_settings):
+    allowed=['reviewed-region-a.blob.core.windows.net','reviewed-region-b.blob.core.windows.net']
+    media_settings.media_download_hosts=allowed
+    resolved=[];received=[]
+    async def resolver(host):
+        resolved.append(host)
+        return '8.8.8.8'
+    def handler(request):
+        received.append(request.headers['host'])
+        assert request.extensions['sni_hostname']==request.headers['host']
+        return httpx.Response(200,stream=Chunks(JPEG))
+    client=AttachmentDownloader(media_settings,httpx.MockTransport(handler),resolver)
+    for host in allowed:
+        ref=ChatGPTFile(download_url=f'https://{host}/file?signature={SECRET}',file_id='file-test')
+        output=BytesIO()
+        assert await client.receive(ref,output)==len(JPEG)
+        assert output.getvalue()==JPEG
+    for host in ['unreviewed.blob.core.windows.net',
+                 'child.'+allowed[0],allowed[0]+'.evil.invalid']:
+        ref=ChatGPTFile(download_url=f'https://{host}/file',file_id='file-test')
+        with pytest.raises(HubError) as error:await client.receive(ref,BytesIO())
+        assert error.value.code=='attachment_host_unverified'
+    assert resolved==received==allowed
+
+
 @pytest.mark.parametrize('headers,body',[({'content-length':'999999999'},JPEG),
     ({'content-length':'-1'},JPEG),({'content-length':'0'},b''),
     ({'content-encoding':'gzip'},JPEG),({'content-length':'1'},JPEG)])
