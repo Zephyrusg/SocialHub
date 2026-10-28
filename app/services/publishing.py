@@ -60,6 +60,12 @@ class PublishingService:
         if not isinstance(request, PublicationRequest):
             request = PublicationRequest.model_validate(request)
         data = request.model_dump()
+        if data['content_type'] == 'reel':
+            if data['is_ai_generated'] is None:
+                data['is_ai_generated'] = self.settings.reels_ai_generated_default
+        else:
+            # Preserve historical text/image/video request hashes and semantics.
+            data.pop('is_ai_generated')
         data['account_ids'] = sorted(data['account_ids'])
         require_write_accounts(self.settings, data['account_ids'])
         assets = [self.media.get(mid, principal) for mid in data['media_ids']]

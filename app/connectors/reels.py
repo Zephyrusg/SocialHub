@@ -93,12 +93,15 @@ class ReelWorkflows:
         stage = state.get('stage')
         fb = self.platform == 'facebook'
         prefix = 'fb' if fb else 'ig'
+        # Legacy prepared requests remain unchanged: never infer disclosure at execution.
+        disclosure = ({'is_ai_generated': request['is_ai_generated']}
+                      if isinstance(request.get('is_ai_generated'), bool) else {})
         if len(request['text']) > 2200:
             raise HubError('invalid_content', 'Reel captions are limited to 2200 characters in this service', diagnostics={'mutation_attempted': False})
         if not state:
             try:
                 response = await self.graph.mutate('POST', f'{account_id}/video_reels' if fb else f'{account_id}/media',
-                    {'upload_phase': 'start'} if fb else {'media_type': 'REELS', 'upload_type': 'resumable', 'caption': request['text']})
+                    {'upload_phase': 'start'} if fb else {'media_type': 'REELS', 'upload_type': 'resumable', 'caption': request['text'], **disclosure})
             except HubError as error:
                 if not fb and error.code == 'api_error' and error.diagnostics.get('provider_code') == 100:
                     error.message = 'Meta refused the Instagram resumable session; verify Facebook Login for Business eligibility, permissions and API support. No hosted-URL fallback or replacement was attempted'
@@ -121,7 +124,7 @@ class ReelWorkflows:
             if ready['checkpoint'].get('stage') != stage:
                 return ready
             response = await self.graph.mutate('POST', f'{account_id}/video_reels' if fb else f'{account_id}/media_publish',
-                {'upload_phase': 'finish', 'video_id': state['remote_id'], 'video_state': 'PUBLISHED', 'description': request['text']}
+                {'upload_phase': 'finish', 'video_id': state['remote_id'], 'video_state': 'PUBLISHED', 'description': request['text'], **disclosure}
                 if fb else {'creation_id': state['container_id']})
             if not fb:
                 delivered = self.delivered(self.remote_id(response))

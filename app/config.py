@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     facebook_media_publishing_enabled: bool = False
     facebook_media_allowed_types: list[Literal['image', 'video', 'reel']] = ['image', 'video']
     instagram_reels_publishing_enabled: bool = False
+    reels_ai_generated_default: bool = True
 
     @model_validator(mode='after')
     def secure_defaults(self):

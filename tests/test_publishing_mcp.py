@@ -37,6 +37,9 @@ async def test_mcp_prepare_approve_execute_and_legacy_preview(tmp_path,monkeypat
             tools=await rpc('tools/list',{})
             names={t['name'] for t in tools['tools']}
             descriptions={t['name']:t for t in tools['tools']}
+            disclosure = descriptions['prepare_publication']['inputSchema']['properties']['is_ai_generated']
+            assert {'type': 'boolean'} in disclosure['anyOf']
+            assert 'disclosure is not publication consent' in descriptions['prepare_publication']['description']
             executing=descriptions['execute_publication'];status_tool=descriptions['get_publication_status']
             assert executing['annotations']['readOnlyHint'] is False and executing['annotations']['destructiveHint'] is True
             assert 'at most one mutation' in executing['description'] and 'retry_at' in executing['description']

@@ -3,7 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from pydantic import Field, AnyHttpUrl
+from pydantic import Field, AnyHttpUrl, StrictBool
 from urllib.parse import urlsplit
 from app.security.origins import OriginBoundary
 from mcp.server.fastmcp import FastMCP
@@ -223,10 +223,12 @@ def create_server(settings=None):
                                   text: Annotated[str, Field(max_length=63206)] = '',
                                   content_type: Literal['text', 'image', 'link', 'video', 'reel'] = 'text',
                                   media_ids: Annotated[list[Short], Field(max_length=1)] = [], link_url: Annotated[str, Field(max_length=2048)] | None = None,
-                                  operation: Literal['publish', 'update', 'reply'] = 'publish', post_id: Short | None = None, comment_id: Short | None = None) -> dict[str, Any]:
-        """Prepare the exact requested content/accounts for review in ChatGPT. Does not publish or grant approval. Immutable text and media hashes bind execution; follow the returned approval path and respect native host confirmation."""
+                                  operation: Literal['publish', 'update', 'reply'] = 'publish', post_id: Short | None = None, comment_id: Short | None = None,
+                                  is_ai_generated: StrictBool | None = None) -> dict[str, Any]:
+        """Prepare the exact requested content/accounts for review in ChatGPT. Does not publish or grant approval. For Reels, is_ai_generated defaults to the server preference (on by default); show its resolved value in the preview and use false only for non-AI footage. This disclosure is not publication consent. Immutable text, disclosure and media hashes bind execution; follow the returned approval path and respect native host confirmation."""
         return await publication_call('prepare', idempotency_key=idempotency_key, request={'account_ids': account_ids, 'text': text,
-            'content_type': content_type, 'media_ids': media_ids, 'link_url': link_url, 'operation': operation, 'post_id': post_id, 'comment_id': comment_id})
+            'content_type': content_type, 'media_ids': media_ids, 'link_url': link_url, 'operation': operation, 'post_id': post_id, 'comment_id': comment_id,
+            'is_ai_generated': is_ai_generated})
 
     @mcp.tool(annotations=read, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read']}]})
     async def get_publication_preview(publication_id: Short) -> dict[str, Any]:

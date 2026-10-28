@@ -1,5 +1,5 @@
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 
 class PublicationRequest(BaseModel):
@@ -8,6 +8,7 @@ class PublicationRequest(BaseModel):
     operation: Literal['publish', 'update', 'reply'] = 'publish'
     content_type: Literal['text', 'image', 'link', 'video', 'reel'] = 'text'
     text: str = Field(default='', max_length=63206)
+    is_ai_generated: StrictBool | None = None
     media_ids: list[str] = Field(default_factory=list, max_length=1)
     link_url: str | None = Field(default=None, max_length=2048)
     post_id: str | None = Field(default=None, max_length=128)
@@ -15,6 +16,8 @@ class PublicationRequest(BaseModel):
 
     @model_validator(mode='after')
     def consistent(self):
+        if self.is_ai_generated is not None and self.content_type != 'reel':
+            raise ValueError('AI disclosure is currently supported for Reels only')
         if len(set(self.account_ids)) != len(self.account_ids):
             raise ValueError('Duplicate target accounts')
         if self.operation != 'publish':

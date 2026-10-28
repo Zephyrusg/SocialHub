@@ -3,6 +3,11 @@
 Status: proposed; no UI implementation or production activation is included in
 the Facebook Reel acceptance follow-up. Prioritize this before Instagram live tests.
 
+The owner's AI disclosure request takes priority over this UI. Implement the
+[Reel disclosure preference](ai-disclosure.md) first; add its default to the
+future Settings page separately from write activation. Changing that default
+must never alter an existing immutable publication.
+
 Extend the existing authenticated Settings/setup page using the existing owner's
 admin identity and recent MFA. Do not require new accounts. Publishing permission
 remains separate from setup/admin permission; broader identity-provider admin

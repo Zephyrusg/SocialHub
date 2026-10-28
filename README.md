@@ -20,6 +20,7 @@ This is an evolving single-owner project. The current live-account allowlist is 
 - Facebook post text, stories and photo/video attachment metadata through consistent [post content reads](docs/facebook-content.md).
 - ChatGPT OAuth linking and MCP reads tested end to end against an isolated mock-data staging environment.
 - Exact publication previews, content/media hashes and persistent per-account operation states.
+- [AI disclosure for Reels](docs/ai-disclosure.md), defaulting on in new immutable previews; live label verification awaits an authorized test.
 - Publishing and supported edit/reply methods implemented behind feature flags and approval checks; coverage varies by operation and platform.
 - Optional setup administration through your existing OIDC account, with separate admin/publisher permissions and encrypted Meta settings.
 - Separate owner approval through an optional lightweight portal, with an administrative CLI fallback; setup does not require that portal.
