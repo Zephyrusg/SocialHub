@@ -82,10 +82,13 @@ fixture encoding occurred during either check. No additional media dependencies
 were installed for Phase 3D; the runtime retains the existing standalone ffprobe
 and image validator. Test fixtures and benchmark harnesses are not in the image.
 
-The candidate image contains application source from commit `05802ed`; subsequent
-regional-host tests and acceptance-report commits do not change runtime code.
-The same measured artifact now serves the authorized import-only production
-rollout; image/video publishing acceptance is still pending.
+The resource measurements above were taken from application source `05802ed`.
+The later deployed timeout/reconciliation fix is `5347266`; its ARM64 image is
+123,408,320 bytes (117.7 MiB Docker-reported size). That follow-up changes Python
+code only and preserves the ffprobe binary byte-for-byte and all dependencies.
+RAM/CPU figures above are the original measurements, not a repeated benchmark
+of the follow-up image. Image publishing was tested once and disabled again;
+video publishing acceptance remains pending.
 Private operational evidence contains the complete measurements and artifact
 manifest, without committing identities, attachment references or credentials.
 

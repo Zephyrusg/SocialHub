@@ -28,6 +28,10 @@ Timeout audits retain only an allowlisted phase (`connect`, `read`, `write`,
 `pool` or `unknown`), never an exception string, capability URL or credentials.
 Longer media acknowledgement waits and continued no-retry behavior are covered
 by synthetic HTTP tests. No extra public post was made to test this change.
+The complete suite passes 395 tests. Fix `5347266` was deployed through Git to
+ARM64 production with the runtime environment byte-identical and media publishing
+disabled. Native source/timeout checks and a network-forbidden completed-status
+check passed. No Nginx, provider, schema, dependency or ffprobe change was needed.
 
 ## Administrative reconciliation
 
