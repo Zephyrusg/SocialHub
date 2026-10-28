@@ -27,12 +27,19 @@ reference-only probe is not actual ChatGPT media ingestion acceptance.** Actual
 host checks remain a rollout gate. Actual ChatGPT PNG and H.264/AAC MP4 attachment
 probes have passed in isolated WSL staging: temporary download and validation
 succeeded without registering or publishing media. This establishes the
-pull-reference mechanism for these tested inputs. Controlled retained imports,
+pull-reference mechanism for these tested inputs. Actual real-account
 publication preparation, a confirmed Flow export and authorized live media
 publishing remain separate acceptance checks. Private operational notes hold
 the regional host inventory and test evidence. If the host cannot provide an MP4 reference,
 report the limitation and evaluate an inline file picker/upload bridge; do not
 silently require pasted URLs, base64 payloads, a terminal or a separate portal.
+
+Controlled ChatGPT PNG and MP4 imports and same-key reuse have also passed in
+isolated staging. Server checks confirmed matching file hashes, private
+permissions, future expiry and one import audit/idempotency record per asset.
+No publication was prepared or executed in those tests. See the
+[validation report](facebook-media-validation.md) for resource measurements and
+the remaining rollout gates.
 
 ## Intended normal workflow
 
