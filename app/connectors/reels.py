@@ -165,7 +165,10 @@ class ReelWorkflows:
                         'result': {'remote_id': state['remote_id'], 'permalink': self.permalink(info)}}
             if uncertain and stage == 'fb_reel_ready':
                 state['stage'] = 'fb_reel_publishing'  # A finish may have been accepted.
-            elif stage != 'fb_reel_publishing' and phases[0].get('status') == 'complete' and phases[1].get('status') == 'complete':
+            elif stage != 'fb_reel_publishing' and phases[0].get('status') == 'complete':
+                # Facebook finish starts assembling/encoding. Waiting for processing
+                # to finish before sending finish deadlocks an accepted upload.
+                # Instagram FINISHED readiness above is a different protocol.
                 state['stage'] = 'fb_reel_ready'
         state['polls'] = min(int(state.get('polls', 0)) + 1, 60)
         return {'state': 'processing', 'checkpoint': state,

@@ -25,6 +25,7 @@ class ReelMeta:
         self.fail_upload = None
         self.fail_publish = None
         self.processing = False
+        self.upload_receiving = False
         self.reject_publish = None
         self.pending_publication = False
 
@@ -60,9 +61,10 @@ class ReelMeta:
             return httpx.Response(200, json={'id': '303', 'permalink': 'https://www.instagram.com/reel/example/'})
         if platform == 'instagram':
             return httpx.Response(200, json={'status_code': 'PUBLISHED' if platform in self.published else 'FINISHED' if platform in self.uploaded and not self.processing else 'IN_PROGRESS'})
-        status = {'uploading_phase': {'status': 'complete' if platform in self.uploaded else 'in_progress'},
-                  'processing_phase': {'status': 'in_progress' if self.processing else 'complete'},
-                  'publishing_phase': {'status': 'complete' if platform in self.published and not self.pending_publication else 'in_progress' if platform in self.published else 'not_started'}}
+        status = {'uploading_phase': {'status': 'complete' if platform in self.uploaded and not self.upload_receiving else 'in_progress'},
+                  # Facebook finish initiates processing; it cannot complete beforehand.
+                  'processing_phase': {'status': 'not_started' if platform not in self.published else 'in_progress' if self.processing else 'complete'},
+                  'publishing_phase': {'status': 'complete' if platform in self.published and not self.pending_publication and not self.processing else 'in_progress' if platform in self.published else 'not_started'}}
         return httpx.Response(200, json={'id': '101', 'status': status, 'permalink_url': '/reel/101/'})
 
 
@@ -140,12 +142,14 @@ async def test_ambiguous_upload_recovers_with_gets_without_resending(publisher, 
     _, meta, _, _, execute, poll = await setup_reels(publisher, ['pixelpapa-' + platform])
     meta.fail_upload = platform
     meta.processing = True
+    meta.upload_receiving = True
     await execute()
     uncertain = await execute()
     assert uncertain['targets'][0]['state'] == 'uncertain'
     await execute()
     assert meta.calls[platform + ':upload'] == 1 and not meta.published
     meta.processing = False
+    meta.upload_receiving = False
     ready = await poll()
     assert ready['targets'][0]['checkpoint']['stage'].endswith('_reel_ready')
     await execute()
@@ -345,3 +349,38 @@ async def test_facebook_does_not_apply_instagram_container_or_audio_limits(publi
     await fb.validate(page, request('reel'), [asset])
     with pytest.raises(HubError) as error: await ig.validate(account, request('reel'), [asset])
     assert error.value.code == 'invalid_media'
+
+
+async def test_uploaded_facebook_reel_is_ready_for_finish_before_processing_starts(publisher):
+    service, meta, preview, _, execute, poll = await setup_reels(publisher, ['pixelpapa-facebook'])
+    await execute(); await execute()
+    # Exact ordering observed from Meta: upload complete, processing not_started.
+    before = meta.calls.copy()
+    ready = await poll()
+    target = ready['targets'][0]
+    assert target['checkpoint']['stage'] == 'fb_reel_ready'
+    assert target['next_action'] == 'execute_next_step' and target['attempts'] == 2
+    assert meta.calls['facebook:start'] == before['facebook:start'] == 1
+    assert meta.calls['facebook:upload'] == before['facebook:upload'] == 1
+    assert meta.calls['facebook:publish'] == 0  # Status never finishes autonomously.
+    meta.processing = True
+    finishing = await execute()
+    assert finishing['targets'][0]['checkpoint']['stage'] == 'fb_reel_publishing'
+    assert finishing['targets'][0]['attempts'] == 3
+    pending = await poll()
+    assert pending['state'] == 'in_progress' and meta.calls['facebook:publish'] == 1
+    await execute()  # Already acknowledged finish: GET-only refresh, no duplicate.
+    meta.processing = False
+    assert (await poll())['state'] == 'succeeded'
+    assert meta.calls['facebook:start'] == meta.calls['facebook:upload'] == meta.calls['facebook:publish'] == 1
+
+
+async def test_uncertain_facebook_finish_does_not_become_ready_again_when_processing_not_started():
+    def handler(r):
+        assert r.method == 'GET'
+        return httpx.Response(200, json={'status': {'video_status': 'upload_complete',
+            'uploading_phase': {'status': 'complete'}, 'processing_phase': {'status': 'not_started'},
+            'publishing_phase': {'status': 'not_started'}}})
+    a, aid = adapter('facebook', handler)
+    state = await a.reel_refresh(aid, request('reel'), {'stage': 'fb_reel_ready', 'remote_id': '123'}, uncertain=True)
+    assert state['checkpoint']['stage'] == 'fb_reel_publishing' and state['uncertain']

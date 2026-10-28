@@ -39,12 +39,18 @@ map is not implemented in this release.
 
 | Platform | Session | Private binary transfer | Readiness | Publication | Confirmation |
 | --- | --- | --- | --- | --- | --- |
-| Facebook | POST `/{page}/video_reels`, `upload_phase=start` | POST `rupload.facebook.com/video-upload/{version}/{video_id}` | GET video `status`; uploading and processing phases complete | POST `/{page}/video_reels`, `upload_phase=finish`, `video_state=PUBLISHED` | GET publishing phase complete and `permalink_url` |
+| Facebook | POST `/{page}/video_reels`, `upload_phase=start` | POST `rupload.facebook.com/video-upload/{version}/{video_id}` | GET video `status`; uploading phase complete | POST `/{page}/video_reels`, `upload_phase=finish`, `video_state=PUBLISHED` starts assembling/encoding | GET processing/publishing until publishing completes and `permalink_url` is available |
 | Instagram | POST `/{ig}/media`, `media_type=REELS`, `upload_type=resumable`, caption | POST `rupload.facebook.com/ig-api-upload/{version}/{container_id}` | GET container `status_code=FINISHED` | POST `/{ig}/media_publish`, `creation_id` | Save returned media ID before GET `permalink` |
 
 Facebook stages: `fb_reel_upload` → `fb_reel_processing` → `fb_reel_ready` →
 `fb_reel_publishing` → `delivered`/succeeded. Instagram stages:
 `ig_reel_upload` → `ig_reel_processing` → `ig_reel_ready` → `delivered`/succeeded.
+Facebook's existing `fb_reel_processing` checkpoint also covers the short interval
+after byte upload but before finish: only **upload completion** is required to
+move to `fb_reel_ready`. Facebook finish starts encoding; waiting for processing
+completion before finish deadlocks this API. Instagram instead requires its
+container's `FINISHED` status before `media_publish`. Status reads never send
+either platform's final mutation.
 Every acknowledged mutation is saved before the next mutation. Status-driven
 stage transitions and finalization are audited without incrementing mutation
 attempts. Attempts count durable mutation steps, not whole publications.

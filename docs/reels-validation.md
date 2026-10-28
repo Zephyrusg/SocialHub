@@ -2,8 +2,8 @@
 
 ## Results
 
-- Current WSL suite: **460 passed**, 17.56 seconds.
-- Current Docker suite: **460 passed**, 37.31 seconds, no network, read-only
+- Current WSL suite: **462 passed**, 17.90 seconds.
+- Current Docker suite: **462 passed**, 40.55 seconds, no network, read-only
   root, nonroot runtime user, dropped capabilities, 384 MiB RAM / half a CPU.
   Both runs retain three existing Alembic configuration deprecation warnings.
 - ARM64 and AMD64 runtime builds completed using the existing uv multi-stage
@@ -64,6 +64,27 @@ ambiguous finish/publication, delayed permalinks, approval expiry, disabled-gate
 polling, and ordinary-video compatibility. Existing Facebook text/image/video
 regressions continue to pass. Provider responses in these publishing tests are
 mocked; they do not establish live Reel acceptance.
+
+## First live upload: finish-order correction
+
+The first native Facebook Reel session and binary upload succeeded. Meta confirmed
+all bytes received with `video_status=upload_complete`; both processing and
+publishing remained `not_started`. SocialHub incorrectly waited for processing
+completion before allowing finish, causing repeated status polls without progress.
+Meta's official collection explains that finish starts assembling/encoding.
+
+The correction makes upload completion sufficient for Facebook's final execute
+step. GET-only status checks expose readiness but never finish or resend an
+upload. An ambiguous previous finish remains guarded against repetition, even
+when Meta still reports processing not started. Instagram's FINISHED-before-publish
+sequence remains unchanged. Mocks now reproduce Facebook's actual phase order,
+and two additional regressions bring both WSL and isolated Docker suites to
+**462 passing tests**. The ARM64 patch source/default-gate/dependency check passed
+locally as well; no new package or ffprobe build is introduced.
+
+Deployment of this correction requires separate approval. The existing uploaded
+Reel must be resumed under its original immutable publication ID; never create a
+replacement or repeat its upload. Live public delivery remains unverified.
 
 ## Runtime footprint after the validation patch
 
