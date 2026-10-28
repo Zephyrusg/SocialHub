@@ -442,7 +442,7 @@ class PublishingService:
             if cached and cached.content.get('publication_id') != publication_id:
                 raise HubError('reconciliation_denied', 'Remote post is already bound to another publication')
             target.state = 'succeeded'
-            target.result = {'remote_id': remote_id, 'permalink': post.get('permalink_url') or post.get('permalink'), 'reconciled': True}
+            target.result = {'remote_id': remote_id, 'permalink': adapter.permalink(post), 'reconciled': True}
             target.checkpoint = {'stage': 'delivered', 'remote_id': remote_id, 'reconciled': True}
             target.error_code, target.error_message, target.next_attempt_at = None, None, None
             self.remember_post(db, publication_id, target)

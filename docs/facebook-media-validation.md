@@ -1,10 +1,12 @@
 # Phase 3D validation — 2026-10-28
 
-The feature-gated implementation passes 395 automated tests. Actual ChatGPT
+The feature-gated implementation passes 409 automated tests. Actual ChatGPT
 attachment transfer, validation, retained import and idempotent reuse have passed
 for a PNG and an H.264/AAC MP4 in isolated OAuth-authenticated WSL staging.
 The first explicitly authorized Facebook image test published once; its timeout
-was reconciled without another mutation. Actual video publication is untested.
+was reconciled without another mutation. The first authorized Google Flow video
+also published once, completed asynchronous processing and was then deleted
+after independent verification as explicitly requested by its owner.
 
 The owner subsequently authorized an import-only production rollout. The tested
 ARM64 runtime is healthy with a private HDD media bind and bounded imports.
@@ -19,7 +21,8 @@ authenticated owner access verified by the application).
 Actual ChatGPT production image and Google Flow video imports and real-account
 immutable previews have passed. Independent server checks confirmed matching
 stored bytes/content hashes, private permissions, expiry and zero execution
-attempts for both prepared requests. No publication was executed.
+attempts during that preparation-only stage. Later live tests were separately
+authorized, as recorded below.
 
 ## Actual ChatGPT checks
 
@@ -36,14 +39,17 @@ attempts for both prepared requests. No publication was executed.
 | Production image import and immutable preview | Passed; prepared with zero execution attempts |
 | Production Google Flow video import and immutable preview | Passed; prepared with zero execution attempts |
 | First live Facebook image | One POST; Meta published; client timed out; owner-selected GET-only reconciliation succeeded with one original attempt |
+| First live Facebook video | One POST; processing then ready/published; GET-only finalization succeeded with one original attempt |
+| Authorized video-test cleanup | One DELETE; acknowledged; absent from owned video list and no longer readable; succeeded history retained |
 | External image/video signed GET, HEAD and prefix/suffix ranges | Passed through the VPS with verified TLS |
 | External unsigned, expired, tampered, duplicate and cross-asset signatures | Rejected |
 | External multiple/unsatisfiable ranges and write methods | Rejected; upload route remains blocked |
 
 The owner confirmed that the tested 10.005-second H.264/AAC MP4 was a Google
 Flow export. Its actual ChatGPT transfer, validation, staging import and reuse
-passed. Its production import and preparation have also passed. This confirms
-the tested export profile; real publishing remains a separate check.
+passed. Its production import, preparation and one authorized live publication
+have also passed. This confirms the tested export profile, not every Flow export
+option. The returned relative Reel link is normalized to a full Facebook URL.
 
 The automated suite covers captions, immutable previews, ownership, quotas,
 stream limits, cancellation, expiry cleanup, SSRF/DNS/TLS boundaries, exact-host
@@ -88,7 +94,8 @@ The later deployed timeout/reconciliation fix is `5347266`; its ARM64 image is
 code only and preserves the ffprobe binary byte-for-byte and all dependencies.
 RAM/CPU figures above are the original measurements, not a repeated benchmark
 of the follow-up image. Image publishing was tested once and disabled again;
-video publishing acceptance remains pending.
+the first controlled video publication has now passed. Later permalink
+normalization changes only Python code and preserves the media binary/dependencies.
 Private operational evidence contains the complete measurements and artifact
 manifest, without committing identities, attachment references or credentials.
 
@@ -106,7 +113,10 @@ photo. Its acknowledgement timed out, leaving an uncertain state; owner-selected
 GET-only reconciliation then marked it succeeded without retrying. The media
 gate was disabled again. See [timeout and reconciliation](facebook-media-timeout.md).
 
-1. Resolve the static ffprobe Brotli patch assessment before further video work.
-2. Obtain separate explicit authorization for an exact live Facebook video test.
-   Instagram remains disabled. The longer media acknowledgement wait is tested
-   with mocks; no second real image post was made to validate that change.
+1. Complete the deferred static ffprobe Brotli patch/provenance review. The
+   successful controlled video test proceeded under explicit temporary operator
+   risk acceptance; this does not establish that the media binary is patched.
+2. Production media publishing is off again after the controlled tests. Broader
+   activation remains a separate operator decision. Instagram stays disabled.
+   The video acknowledgement arrived after the old ten-second timeout budget,
+   demonstrating the benefit of the longer media wait without a replacement upload.

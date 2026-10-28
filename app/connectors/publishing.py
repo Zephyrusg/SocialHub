@@ -1,8 +1,26 @@
 """Platform-specific publishing workflows; orchestration stays platform-neutral."""
 from typing import Protocol
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 import httpx
 from app.core import HubError
+
+
+def facebook_permalink(value):
+    """Meta can return a relative Reel URL; expose only a full Facebook link."""
+    if (not isinstance(value, str) or not value or len(value) > 4096
+            or '\\' in value or any(ord(c) < 33 or ord(c) == 127 for c in value)):
+        return None
+    if value.startswith('/') and not value.startswith('//'):
+        value = 'https://www.facebook.com' + value
+    try:
+        parts = urlsplit(value)
+        if (parts.scheme not in {'https', 'http'} or parts.hostname not in
+                {'facebook.com', 'www.facebook.com', 'm.facebook.com', 'web.facebook.com'}
+                or parts.username is not None or parts.password is not None or parts.port not in {None, 443}):
+            return None
+        return urlunsplit(('https', 'www.facebook.com', parts.path or '/', parts.query, ''))
+    except ValueError:
+        return None
 
 
 class PublishingConnector(Protocol):
@@ -15,6 +33,10 @@ class MetaPublishingConnector:
         self.connector = connector
         self.platform = connector.platform
         self.graph = connector.graph
+
+    def permalink(self, info):
+        value = info.get('permalink') or info.get('permalink_url') or info.get('link')
+        return facebook_permalink(value) if self.platform == 'facebook' else value
 
     async def validate(self, account_id, request, assets):
         self.connector.check_account(account_id)
@@ -72,7 +94,7 @@ class MetaPublishingConnector:
             return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': state.get('permalink')}}
         fields = 'id,permalink' if self.platform == 'instagram' else ('id,link' if state.get('lookup_kind') == 'photo' else 'id,permalink_url')
         info = await self.read(state['remote_id'], {'fields': fields})
-        return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': info.get('permalink') or info.get('permalink_url') or info.get('link')}}
+        return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': self.permalink(info)}}
 
     async def refresh_delivery(self, account_id, request, checkpoint):
         self.connector.check_account(account_id)
@@ -90,7 +112,7 @@ class MetaPublishingConnector:
             state['polls'] = min(int(state.get('polls', 0)) + 1, 60)
             return {'state': 'processing', 'checkpoint': state, 'retry_after': 60 if state['polls'] < 60 else 300}
         return {'state': 'succeeded', 'checkpoint': state,
-                'result': {'remote_id': state['remote_id'], 'permalink': info.get('permalink_url')}}
+                'result': {'remote_id': state['remote_id'], 'permalink': self.permalink(info)}}
 
     async def step(self, account_id, request, checkpoint):
         if checkpoint.get('stage') == 'delivered':
@@ -120,7 +142,7 @@ class MetaPublishingConnector:
                 raise HubError('media_processing_failed', 'Meta video processing failed')
             if status != 'ready':
                 return {'state': 'processing', 'checkpoint': state, 'retry_after': 60}
-            return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': info.get('permalink_url')}}
+            return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': self.permalink(info)}}
         if kind in {'text', 'link'}:
             data = {'message': text}
             if kind == 'link':
@@ -177,7 +199,7 @@ class MetaPublishingConnector:
             raise HubError('media_processing_failed', 'Meta Reel processing failed')
         if (status.get('publishing_phase') or {}).get('status') != 'complete':
             return {'state': 'processing', 'checkpoint': state, 'retry_after': 60}
-        return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': info.get('permalink_url')}}
+        return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': self.permalink(info)}}
 
     async def upload_reel(self, upload_url, media_url):
         # Never fetch an arbitrary upload URL or retry an ambiguous upload.
