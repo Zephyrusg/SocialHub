@@ -56,12 +56,13 @@ async def test_mcp_prepare_approve_execute_and_legacy_preview(tmp_path,monkeypat
 
 
 async def test_reconciliation_uses_owned_matching_recent_remote_object(publisher,sessions):
-    from app.database.models import PublicationTarget
-    service,_,_,_=publisher
+    from app.core import HubError
+    service,adapters,_,_=publisher
     preview=await prepare(service)
     tid=preview['targets'][0]['target_id']
-    with sessions.begin() as db:
-        db.get(PublicationTarget,tid).state='uncertain'
+    approve(service,preview)
+    adapters['facebook'].fail=HubError('api_timeout','Unknown outcome')
+    await service.execute('alice',['socialhub:publish'],preview['publication_id'])
     def handler(r):
         assert r.method=='GET'
         return httpx.Response(200,json={'data':[{'id':'remote','message':'Explicit preview caption','created_time':service.clock().isoformat()+'Z','permalink_url':'https://www.facebook.com/remote'}]})
@@ -72,11 +73,13 @@ async def test_reconciliation_uses_owned_matching_recent_remote_object(publisher
 
 
 async def test_reconciliation_refuses_original_old_post(publisher,sessions):
-    from app.database.models import PublicationTarget
-    service,_,_,_=publisher
+    from app.core import HubError
+    service,adapters,_,_=publisher
     preview=await prepare(service)
     tid=preview['targets'][0]['target_id']
-    with sessions.begin() as db:db.get(PublicationTarget,tid).state='uncertain'
+    approve(service,preview)
+    adapters['facebook'].fail=HubError('api_timeout','Unknown outcome')
+    await service.execute('alice',['socialhub:publish'],preview['publication_id'])
     def handler(r):
         assert r.method=='GET'
         return httpx.Response(200,json={'data':[{'id':'old_post','message':'Explicit preview caption','created_time':'2020-01-01T00:00:00Z'}]})

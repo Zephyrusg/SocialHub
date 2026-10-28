@@ -26,7 +26,7 @@ This is an evolving single-owner project. The current live-account allowlist is 
 - Private media ingestion, image validation and metadata-only video checks.
 - Automated tests for authentication, approval boundaries, account restrictions, replay protection and failure handling.
 
-Live Meta reads have been verified during development. One narrowly authorized Facebook text-post test was also completed. That does **not** mean every publishing/media operation is live-verified, or that normal public writes are enabled. Instagram publishing and broader management workflows still need separately authorized acceptance tests. Scheduling currently records mock jobs; there is no autonomous production publishing worker.
+Live Meta reads and narrowly authorized Facebook text and image tests have been verified. The image post's uncertain timeout was reconciled without retrying. That does **not** mean every publishing/media operation is live-verified, or that normal public writes are enabled. Video, Instagram publishing and broader management workflows still need separately authorized acceptance tests. Scheduling currently records mock jobs; there is no autonomous production publishing worker.
 
 ## Designed for a Raspberry Pi
 
@@ -66,7 +66,7 @@ The Python tests use temporary databases and fake API transports; they do not re
 
 Acknowledged Meta deliveries finalize through GET-only metadata refresh; status polling does not publish again. See [delivery finalization](docs/delivery-finalization.md).
 
-Phase 3D adds guarded ChatGPT attachment import, expiring private media and Facebook image/video workflows. Actual PNG and Google Flow MP4 imports/previews and signed external downloads have passed. Live image/video publication still requires separately authorized acceptance tests; see the [validation report](docs/facebook-media-validation.md) and [Facebook media](docs/facebook-media.md).
+Phase 3D adds guarded ChatGPT attachment import, expiring private media and Facebook image/video workflows. Actual PNG and Google Flow MP4 imports/previews, signed external downloads and one live image publication have passed. Video publication still requires separate acceptance; see the [validation report](docs/facebook-media-validation.md), [timeout reconciliation](docs/facebook-media-timeout.md) and [Facebook media](docs/facebook-media.md).
 
 Documentation: [development](docs/development.md), [deployment](docs/deployment.md), [setup administration](docs/administration.md), and [security boundaries](docs/security.md).
 

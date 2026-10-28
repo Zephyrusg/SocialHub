@@ -1,9 +1,10 @@
 # Phase 3D validation — 2026-10-28
 
-The feature-gated implementation passes 371 automated tests. Actual ChatGPT
+The feature-gated implementation passes 395 automated tests. Actual ChatGPT
 attachment transfer, validation, retained import and idempotent reuse have passed
 for a PNG and an H.264/AAC MP4 in isolated OAuth-authenticated WSL staging.
-Production media publishing has not been activated or tested.
+The first explicitly authorized Facebook image test published once; its timeout
+was reconciled without another mutation. Actual video publication is untested.
 
 The owner subsequently authorized an import-only production rollout. The tested
 ARM64 runtime is healthy with a private HDD media bind and bounded imports.
@@ -34,6 +35,7 @@ attempts for both prepared requests. No publication was executed.
 | Staging publications | Zero |
 | Production image import and immutable preview | Passed; prepared with zero execution attempts |
 | Production Google Flow video import and immutable preview | Passed; prepared with zero execution attempts |
+| First live Facebook image | One POST; Meta published; client timed out; owner-selected GET-only reconciliation succeeded with one original attempt |
 | External image/video signed GET, HEAD and prefix/suffix ranges | Passed through the VPS with verified TLS |
 | External unsigned, expired, tampered, duplicate and cross-asset signatures | Rejected |
 | External multiple/unsatisfiable ranges and write methods | Rejected; upload route remains blocked |
@@ -95,9 +97,13 @@ external checks passed without Meta requests or publication calls. The privacy
 marker was absent from Pi container logs; the operator confirmed a zero count
 in the bounded VPS access/error log check. Capability URLs remained in memory
 and were not printed or written into reports. VPS configuration was unchanged.
-Post-test checks confirmed both media previews still prepared, zero execution
-attempts, Facebook media publishing disabled and existing text policy preserved.
+Those download-only checks preserved prepared previews with zero attempts. A
+subsequent explicitly authorized image test made one POST and Meta published the
+photo. Its acknowledgement timed out, leaving an uncertain state; owner-selected
+GET-only reconciliation then marked it succeeded without retrying. The media
+gate was disabled again. See [timeout and reconciliation](facebook-media-timeout.md).
 
-1. Obtain explicit authorization for exact live Facebook image and video test
-   publications, one at a time. Instagram remains disabled. No real media was
-   published in this phase's completed checks.
+1. Resolve the static ffprobe Brotli patch assessment before further video work.
+2. Obtain separate explicit authorization for an exact live Facebook video test.
+   Instagram remains disabled. The longer media acknowledgement wait is tested
+   with mocks; no second real image post was made to validate that change.

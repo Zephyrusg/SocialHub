@@ -33,7 +33,12 @@ class GraphClient:
             values['appsecret_proof'] = hmac.new(self.app_secret.encode(), self.token.encode(), hashlib.sha256).hexdigest()
         safe_retry = method == 'GET' and path != 'oauth/access_token'
         attempts = 3 if safe_retry else 1  # Never blindly retry public writes.
-        async with httpx.AsyncClient(base_url=self.base_url, transport=self.transport, timeout=10, follow_redirects=False) as client:
+        # Meta may fetch/process a remote media URL before acknowledging the POST.
+        # The old ten-second read limit could expire after the photo was published.
+        media_post = method == 'POST' and path.rsplit('/', 1)[-1] in {'photos', 'videos'}
+        timeout = httpx.Timeout(120 if media_post else 10, connect=10,
+            write=30 if media_post else 10, pool=10)
+        async with httpx.AsyncClient(base_url=self.base_url, transport=self.transport, timeout=timeout, follow_redirects=False) as client:
             for attempt in range(attempts):
                 try:
                     response = await client.request(method, path, params=values if method == 'GET' else None,
@@ -42,9 +47,15 @@ class GraphClient:
                     if attempt < attempts - 1:
                         await asyncio.sleep(0.05 * 2 ** attempt)
                         continue
-                    timeout = isinstance(error, httpx.TimeoutException)
-                    raise HubError('api_timeout' if timeout else 'api_unavailable',
-                        ('Meta request timed out; retry the read' if safe_retry else 'Meta code exchange failed; start a new local Facebook Login' if path == 'oauth/access_token' else 'Write outcome uncertain; reconcile before any retry'), safe_retry, diagnostics={'mutation_attempted': method != 'GET'}) from None
+                    timed_out = isinstance(error, httpx.TimeoutException)
+                    diagnostics = {'mutation_attempted': method != 'GET'}
+                    if timed_out:
+                        diagnostics['timeout_phase'] = next((phase for kind, phase in [
+                            (httpx.ConnectTimeout, 'connect'), (httpx.ReadTimeout, 'read'),
+                            (httpx.WriteTimeout, 'write'), (httpx.PoolTimeout, 'pool')]
+                            if isinstance(error, kind)), 'unknown')
+                    raise HubError('api_timeout' if timed_out else 'api_unavailable',
+                        ('Meta request timed out; retry the read' if safe_retry else 'Meta code exchange failed; start a new local Facebook Login' if path == 'oauth/access_token' else 'Write outcome uncertain; reconcile before any retry'), safe_retry, diagnostics=diagnostics) from None
                 try:
                     payload = response.json()
                     if not isinstance(payload, dict) or not isinstance(payload.get('error', {}), dict):

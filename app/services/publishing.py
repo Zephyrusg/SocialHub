@@ -302,7 +302,8 @@ class PublishingService:
                 retry = (not mutation_attempted and error.retryable) or error.code == 'rate_limited' or (not sent and error.retryable)
                 state = 'uncertain' if uncertain else 'retryable' if retry else 'failed'
                 self.finish(publication_id, target['target_id'], principal, claim['lease'],
-                    {'state': state, 'checkpoint': checkpoint, 'error_code': error.code, 'error_message': error.message[:256], 'retry_after': 60 if retry else 0})
+                    {'state': state, 'checkpoint': checkpoint, 'error_code': error.code, 'error_message': error.message[:256],
+                     'timeout_phase': error.diagnostics.get('timeout_phase'), 'retry_after': 60 if retry else 0})
             except Exception:
                 # Never expose provider exceptions or silently resend after an unexpected failure.
                 self.finish(publication_id, target['target_id'], principal, claim['lease'],
@@ -381,21 +382,30 @@ class PublishingService:
             target.lease_token, target.lease_until = None, None
             delay = outcome.get('retry_after', 0)
             target.next_attempt_at = self.clock() + timedelta(seconds=delay) if delay else None
-            db.add(Audit(subject=principal, operation='execute_publication', account_id=target.account_id, outcome=target.state,
-                details={'publication_id': publication_id, 'target_id': target.id, 'error_code': target.error_code, 'remote_id': target.result.get('remote_id')}))
+            details = {'publication_id': publication_id, 'target_id': target.id, 'error_code': target.error_code, 'remote_id': target.result.get('remote_id')}
+            if target.error_code == 'api_timeout' and outcome.get('timeout_phase') in {'connect', 'read', 'write', 'pool', 'unknown'}:
+                details['timeout_phase'] = outcome['timeout_phase']
+            db.add(Audit(subject=principal, operation='execute_publication', account_id=target.account_id, outcome=target.state, details=details))
             if target.state == 'succeeded' and target.result.get('remote_id'):
                 self.remember_post(db, publication_id, target)
 
-    async def reconcile(self, publication_id, target_id, remote_id, issuer):
+    async def reconcile(self, publication_id, target_id, remote_id, issuer, *, expected_hash=None):
         """LOCAL OWNER ONLY: verify a known owned remote object; never sends a mutation."""
         from datetime import datetime, timezone
         preview = self.review(publication_id, None)
+        if not issuer or len(issuer) > 128 or (expected_hash is not None and expected_hash != preview['request_hash']):
+            raise HubError('reconciliation_denied', 'Trusted owner and exact reviewed hash are required')
         with self.sessions() as db:
             target = db.get(PublicationTarget, target_id)
             item = db.get(Publication, publication_id)
             if not target or target.publication_id != publication_id or target.state != 'uncertain':
                 raise HubError('reconciliation_denied', 'Only an uncertain target from this publication can be reconciled')
-            aid, created = target.account_id, item.created_at
+            if target.lease_token is not None:
+                raise HubError('reconciliation_denied', 'An active claim cannot be reconciled')
+            approval = db.scalar(select(PublicationApproval).where(PublicationApproval.publication_id == publication_id))
+            if not approval or not approval.used_at or target.attempts < 1:
+                raise HubError('reconciliation_denied', 'A recorded authorized execution is required')
+            aid, created, attempts = target.account_id, approval.used_at, target.attempts
         request = preview['preview']['request']
         account, _, adapter = self.context(aid, execute=False)
         # Reconciliation is a connector read operation, not a generic remote-ID acceptance.
@@ -405,9 +415,15 @@ class PublishingService:
             raise HubError('manual_check_required', 'Reply outcome needs a parent-bound reply reader; no automatic resend is allowed')
         if request['operation'] == 'update' and remote_id != request['post_id']:
             raise HubError('reconciliation_denied', 'An edit can only reconcile its original owned post ID')
+        if request['operation'] == 'publish' and request['content_type'] not in {'text', 'link', 'image'}:
+            raise HubError('manual_check_required', 'Video/Reel reconciliation requires verified processing evidence; no resend is allowed')
         post = await adapter.connector.get_post(account.remote_id, remote_id)
         if (post.get('message') if account.platform == 'facebook' else post.get('caption')) != request['text']:
             raise HubError('reconciliation_denied', 'Remote text does not match the approved publication')
+        if request['content_type'] == 'image':
+            photos = (post.get('attachments') or {}).get('data', [])
+            if account.platform != 'facebook' or len(photos) != 1 or photos[0].get('type') != 'photo':
+                raise HubError('reconciliation_denied', 'Owner-selected image outcome must contain exactly one Facebook photo')
         if request['operation'] == 'publish':
             try:
                 stamp = datetime.fromisoformat((post.get('created_time') or post.get('timestamp') or '').replace('Z', '+00:00'))
@@ -416,11 +432,23 @@ class PublishingService:
             except ValueError:
                 raise HubError('reconciliation_denied', 'A pre-existing or undated post cannot prove this publication succeeded') from None
         with self.sessions.begin() as db:
+            item = self.checked(db, publication_id, preview['principal'])
             target = db.scalar(select(PublicationTarget).where(PublicationTarget.id == target_id).with_for_update())
-            if target.state != 'uncertain':
+            if (item.request_hash != preview['request_hash'] or not target or target.state != 'uncertain'
+                    or target.publication_id != publication_id or target.account_id != aid
+                    or target.attempts != attempts or target.lease_token is not None):
                 raise HubError('reconciliation_denied', 'Target state changed during reconciliation')
+            cached = db.scalar(select(Post).where(Post.account_id == aid, Post.remote_id == remote_id))
+            if cached and cached.content.get('publication_id') != publication_id:
+                raise HubError('reconciliation_denied', 'Remote post is already bound to another publication')
             target.state = 'succeeded'
             target.result = {'remote_id': remote_id, 'permalink': post.get('permalink_url') or post.get('permalink'), 'reconciled': True}
-            target.error_code, target.error_message = None, None
-            db.add(Audit(subject=issuer, operation='reconcile_publication', account_id=aid, outcome='success', details={'publication_id': publication_id, 'remote_id': remote_id}))
+            target.checkpoint = {'stage': 'delivered', 'remote_id': remote_id, 'reconciled': True}
+            target.error_code, target.error_message, target.next_attempt_at = None, None, None
+            self.remember_post(db, publication_id, target)
+            details = {'publication_id': publication_id, 'remote_id': remote_id,
+                'request_hash': item.request_hash, 'mutation_attempted': False, 'attempts_unchanged': True}
+            if request['content_type'] == 'image':
+                details['media_evidence'] = 'owner-selected remote ID, caption, execution time and single photo; remote bytes not hash-equated'
+            db.add(Audit(subject=issuer, operation='reconcile_publication', account_id=aid, outcome='success', details=details))
         return self.review(publication_id, None)
