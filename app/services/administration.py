@@ -13,6 +13,7 @@ from app.security.tokens import TokenVault
 from app.services.browser_oidc import BrowserOIDC
 from app.services.approval_portal import token_hash
 from app.connectors.meta_policy import PAGE_ID, INSTAGRAM_ID
+from app.services.feature_flags import DYNAMIC_FIELDS, apply_flags, deployment_settings
 
 FIELDS = {'meta_app_id', 'meta_app_secret', 'meta_live_reads'}
 
@@ -23,7 +24,7 @@ def require_publisher(settings, subject):
 
 
 def effective_settings(settings, sessions):
-    base = settings.base if isinstance(settings, EffectiveSettings) else settings
+    base = deployment_settings(settings)
     with sessions() as db:
         row = db.get(SiteConfiguration, 'meta')
         revision = row.revision if row else 0
@@ -40,11 +41,11 @@ def effective_settings(settings, sessions):
             values['meta_app_secret'] = SecretStr(values['meta_app_secret'])
         result = base.model_copy(update=values)
         result._meta_configuration_revision = revision
-        return result
+        return apply_flags(result, base, db)
 
 
 class EffectiveSettings:
-    """Immutable security settings plus fresh snapshots of the three managed Meta fields."""
+    """Deployment security policy plus fresh, restrictive database preferences."""
     def __init__(self, base, sessions):
         self.base, self.sessions = base, sessions
 
@@ -52,7 +53,11 @@ class EffectiveSettings:
         return effective_settings(self.base, self.sessions)
 
     def __getattr__(self, name):
-        return getattr(self.snapshot() if name in FIELDS else self.base, name)
+        if name in DYNAMIC_FIELDS and getattr(self.base, name) is False:
+            return False  # A deployment prohibition cannot require or consult an override.
+        if name == 'approval_mode' and self.base.approval_mode != 'chatgpt_direct':
+            return self.base.approval_mode
+        return getattr(self.snapshot() if name in FIELDS | DYNAMIC_FIELDS | {'_feature_states'} else self.base, name)
 
 
 class AdminSessions:
@@ -138,8 +143,8 @@ class Administration:
             'meta_secret_configured': bool(active.meta_app_secret.get_secret_value()),
             'live_reads': active.meta_live_reads, 'accounts': accounts,
             'administrator': True, 'publishing_permission': subject in self.settings.publishing_allowed_subjects,
-            'live_writes': self.settings.meta_live_writes and self.settings.publishing_enabled,
-            'approval_mode': self.settings.approval_mode}
+            'live_writes': active.meta_live_writes and active.publishing_enabled,
+            'approval_mode': active.approval_mode}
 
     def save(self, subject, revision, *, app_id=None, app_secret=None, live_reads=None):
         self._authorize(subject)

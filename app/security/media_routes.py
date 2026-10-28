@@ -17,7 +17,9 @@ def register_media_routes(mcp, settings, sessions):
 
     @mcp.custom_route('/media/upload', methods=['POST'])
     async def upload(request):
-        if not settings.media_ingestion_enabled:
+        try:enabled = settings.media_ingestion_enabled
+        except Exception:return JSONResponse({'error': 'configuration_unavailable'}, status_code=503, headers={'Cache-Control':'no-store'})
+        if not enabled:
             return JSONResponse({'error': 'media_disabled'}, status_code=404)
         if len(request.headers.getlist('authorization')) != 1:
             return JSONResponse({'error': 'media_scope_required'}, status_code=403)
@@ -54,7 +56,9 @@ def register_media_routes(mcp, settings, sessions):
 
     @mcp.custom_route('/media/{media_id}', methods=['GET', 'HEAD'])
     async def download(request):
-        if not settings.media_delivery_enabled:
+        try:enabled = settings.media_delivery_enabled
+        except Exception:return JSONResponse({'error': 'configuration_unavailable'}, status_code=503, headers={'Cache-Control':'no-store'})
+        if not enabled:
             return JSONResponse({'error': 'media_disabled'}, status_code=404)
         mid = request.path_params['media_id']
         try:

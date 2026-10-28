@@ -10,10 +10,11 @@ There is no SocialHub password/user database to enroll into. The administrator s
 - Save the main Facebook App ID and App Secret, encrypted in the existing database using the project's encryption key. A blank secret field preserves its current value; secrets are never returned to the page.
 - Issue the secure one-use Facebook Login handoff for the already allowlisted Facebook/Instagram accounts. The page offers a local continuation link; it does not relax account restrictions or ask for credentials in chat.
 - Show stored connection/expiration state and enable or disable reads after both accounts have been verified. No Meta request is performed merely by switching the read setting.
+- Manage [runtime feature preferences](feature-flags.md) within deployment-level limits, with independent revisions, atomic audit records and no restart for preference changes.
 
 Changing Meta credentials disables reads, revokes the old stored platform credentials and invalidates pending Meta logins. Configuration revisions reject stale/concurrent forms and prevent an in-flight old-configuration OAuth login from storing credentials after the setup has changed. An already-dispatched external request cannot be recalled by changing settings.
 
-The page cannot edit identity allowlists, grant itself publishing permission, change the issuer/origin/encryption key, enable public writes, approve a publication, execute content or bypass per-action consent. It exposes no new MCP tool.
+The page cannot edit identity/account allowlists, grant itself publishing permission, change the issuer/origin/encryption key, exceed deployment write ceilings, approve a publication, execute content or bypass per-action consent. It can pause and resume only already permitted capabilities. It exposes no new MCP tool.
 
 ## Administrator and publishing permissions
 
@@ -55,7 +56,7 @@ Sessions are hashed in the DB, cookie-bound and invalidated when the bootstrap a
 
 The admin pages use `Referrer-Policy: strict-origin`: query-bearing URLs are not sent in referrers, while normal browser forms retain the Origin header required by the CSRF boundary. The [Fetch Standard](https://fetch.spec.whatwg.org/#origin-header) explains why `no-referrer` produces a null Origin for these form requests. Do not “fix” that browser behavior by accepting null origins.
 
-Managed Meta values in `site_configuration` override their environment defaults. Bootstrap role/auth/write settings remain local environment configuration. Keep the encryption key and DB recoverable together; rotating the key requires a deliberate migration of stored settings and platform credentials. The CLI Meta helpers read the same effective configuration through `MetaOAuth`; external scripts constructing their own `Hub` should use `EffectiveSettings` if they need runtime preference changes.
+Managed Meta values in `site_configuration` override their environment defaults. Runtime feature preferences in its separate `features` record can only restrict deployment permissions. Bootstrap roles, authentication and write ceilings remain protected environment configuration. Keep the encryption key and DB recoverable together; rotating the key requires a deliberate migration of stored settings and platform credentials. CLI Meta helpers read the same effective configuration through `MetaOAuth`; external scripts constructing their own `Hub` should use `EffectiveSettings` for runtime preferences.
 
 ## Local verification
 
@@ -83,4 +84,4 @@ See the [recorded validation results and resource measurements](administration-v
 
 Disabling `ADMIN_ENABLED` closes setup access but does not discard encrypted settings already saved in the DB. Back up and reconcile those settings before attempting a configuration reset. A downgrade that drops administration tables loses saved setup preferences; do not run one automatically. Older images have a different readiness-schema expectation, so an image-only rollback is not a complete schema compatibility plan. On a first rollout, stopping the new app/route is the safe fallback.
 
-Media concurrency/quota hardening and ChatGPT refresh-token integration remain separate work. This feature is setup administration, not an approval portal or an automatic production deployment.
+Feature controls reuse the existing media budgets and retention cleanup. ChatGPT refresh-token integration remains separate work. Setup administration is not publication approval or automatic production deployment.

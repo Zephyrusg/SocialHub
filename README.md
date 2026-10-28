@@ -23,6 +23,7 @@ This is an evolving single-owner project. The current live-account allowlist is 
 - [AI disclosure for Reels](docs/ai-disclosure.md), defaulting on in new immutable previews; live label verification awaits an authorized test.
 - Publishing and supported edit/reply methods implemented behind feature flags and approval checks; coverage varies by operation and platform.
 - Optional setup administration through your existing OIDC account, with separate admin/publisher permissions and encrypted Meta settings.
+- [Feature Flags in Settings](docs/feature-flags.md): persistent switches within deployment limits, with revisions, audit records and no restart for runtime changes.
 - Separate owner approval through an optional lightweight portal, with an administrative CLI fallback; setup does not require that portal.
 - Private media ingestion, image validation and metadata-only video checks.
 - Automated tests for authentication, approval boundaries, account restrictions, replay protection and failure handling.

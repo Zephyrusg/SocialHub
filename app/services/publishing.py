@@ -35,6 +35,10 @@ class PublishingService:
             require_write_accounts(self.settings, [account_id])
         from app.services.hub import Hub
         active = effective_settings(self.settings, self.sessions)
+        if execute:
+            if not active.meta_live_writes or not active.publishing_enabled:
+                raise HubError('live_writes_disabled', 'Live publishing is paused')
+            self.require_platforms(active, {'account_ids':[account_id]})
         with self.sessions() as db:
             account = Hub(self.sessions, active).account(db, account_id)
             if account.is_mock:
@@ -48,7 +52,7 @@ class PublishingService:
                 adapter = self.connector_factory(account, execute)
             else:
                 graph = GraphClient(token['access_token'], active.meta_graph_version,
-                    app_secret=active.meta_app_secret.get_secret_value(), allow_writes=execute and self.settings.meta_live_writes and self.settings.publishing_enabled)
+                    app_secret=active.meta_app_secret.get_secret_value(), allow_writes=execute and active.meta_live_writes and active.publishing_enabled)
                 connector = (FacebookConnector if account.platform == 'facebook' else InstagramConnector)(graph, account.remote_id)
                 adapter = MetaPublishingConnector(connector)
             return account, caps, adapter
@@ -114,18 +118,19 @@ class PublishingService:
             raise HubError('preview_changed', 'Stored preview changed after preparation; execution is refused')
         return item
 
-    def media_write_allowed(self, request):
+    def media_write_allowed(self, request, active=None):
+        active = active or effective_settings(self.settings, self.sessions)
         if not request['media_ids']:
             return True
         for aid in request['account_ids']:
             if aid == 'pixelpapa-facebook':
-                if not self.settings.facebook_media_publishing_enabled or request['content_type'] not in self.settings.facebook_media_allowed_types:
+                if not active.facebook_media_publishing_enabled or request['content_type'] not in active.facebook_media_allowed_types:
                     return False
-                if request['content_type'] != 'reel' and not self.settings.media_delivery_enabled:
+                if request['content_type'] != 'reel' and not active.media_delivery_enabled:
                     return False
             if aid == 'pixelpapa-instagram':
                 # Adding Instagram to the account allowlist must not activate images too.
-                if request['content_type'] != 'reel' or not self.settings.instagram_reels_publishing_enabled:
+                if request['content_type'] != 'reel' or not active.instagram_reels_publishing_enabled:
                     return False
         return True
 
@@ -154,6 +159,7 @@ class PublishingService:
         return 'execute_next_step'
 
     def review(self, publication_id, principal):
+        active = effective_settings(self.settings, self.sessions)
         with self.sessions() as db:
             item = self.checked(db, publication_id, principal)
             targets = list(db.scalars(select(PublicationTarget).where(PublicationTarget.publication_id == publication_id).order_by(PublicationTarget.account_id)))
@@ -171,8 +177,9 @@ class PublishingService:
                 state = 'in_progress'
             return {'publication_id': item.id, 'request_hash': item.request_hash, 'principal': item.principal,
                 'preview': item.payload, 'state': state, 'requires_owner_approval': not bool(approval and approval.expires_at > self.clock()),
-                'live_writes_enabled': bool(self.settings.meta_live_writes and self.settings.publishing_enabled
-                    and self.media_write_allowed(item.payload['request'])
+                'live_writes_enabled': bool(active.meta_live_writes and active.publishing_enabled
+                    and self.platforms_enabled(active, item.payload['request'])
+                    and self.media_write_allowed(item.payload['request'], active)
                     and all(aid in self.settings.meta_write_account_ids for aid in item.payload['request']['account_ids'])),
                 'approval_channel': approval.channel if approval else None,
                 'independent_owner_approval': bool(approval and approval.channel in {'owner_cli', 'owner_portal'} and approval.expires_at > self.clock()),
@@ -227,21 +234,23 @@ class PublishingService:
         return {'revoked': True, 'publication_id': publication_id}
 
     def approval_requirements(self, publication_id, principal, context=None):
+        active = effective_settings(self.settings, self.sessions)
+        policy = ApprovalPolicy(active)
         with self.sessions() as db:
             item = self.checked(db, publication_id, principal)
-            result = self.approval_policy.requirements(principal, item.payload, context)
+            result = policy.requirements(principal, item.payload, context)
             grant = db.scalar(select(PublicationApproval).where(PublicationApproval.publication_id == publication_id))
             current = bool(grant and grant.principal == principal and grant.request_hash == item.request_hash
                            and grant.expires_at > self.clock())
             owner_valid = current and grant.channel in {'owner_cli', 'owner_portal'}
             policy_valid = bool(current and grant.channel == 'chatgpt_policy'
                 and not result['independent_owner_required'] and grant.oauth_client_id == context.oauth_client_id
-                and grant.evidence_hash == self.approval_policy.fingerprint())
+                and grant.evidence_hash == policy.fingerprint())
             result['owner_grant_valid'] = bool(owner_valid)
             result['current_grant_valid'] = bool(owner_valid or policy_valid)
             result['write_accounts_allowed'] = all(aid in self.settings.meta_write_account_ids for aid in item.payload['request']['account_ids'])
-            result['media_write_allowed'] = self.media_write_allowed(item.payload['request'])
-            result['live_writes_enabled'] = bool(result['media_write_allowed'] and result['write_accounts_allowed'] and self.settings.meta_live_writes and self.settings.publishing_enabled)
+            result['media_write_allowed'] = self.media_write_allowed(item.payload['request'], active)
+            result['live_writes_enabled'] = bool(result['media_write_allowed'] and result['write_accounts_allowed'] and self.platforms_enabled(active, item.payload['request']) and active.meta_live_writes and active.publishing_enabled)
             if grant and not (owner_valid or policy_valid):
                 result.update(independent_owner_required=True, execution_channel='independent_owner',
                               next_step='The prior grant expired, was revoked, or no longer matches policy. A fresh independent owner decision is required; do not retry or mint a replacement automatically.')
@@ -251,13 +260,16 @@ class PublishingService:
             return result
 
     def claim(self, publication_id, target_id, principal, context=None):
+        active = self.execution_settings()
+        policy = ApprovalPolicy(active)
         with self.sessions.begin() as db:
             item = self.checked(db, publication_id, principal)
             require_write_accounts(self.settings, item.payload['request']['account_ids'])
+            self.require_platforms(active, item.payload['request'])
             approval = db.scalar(select(PublicationApproval).where(PublicationApproval.publication_id == publication_id).with_for_update())
-            if approval is None and self.approval_policy.eligible(principal, item.payload, context):
+            if approval is None and policy.eligible(principal, item.payload, context):
                 approval = PublicationApproval(publication_id=item.id, principal=principal, request_hash=item.request_hash,
-                    issuer='chatgpt-policy', evidence_hash=self.approval_policy.fingerprint(),
+                    issuer='chatgpt-policy', evidence_hash=policy.fingerprint(),
                     channel='chatgpt_policy', oauth_client_id=context.oauth_client_id,
                     expires_at=self.clock() + timedelta(hours=1))
                 db.add(approval)
@@ -265,13 +277,13 @@ class PublishingService:
                 db.add(Audit(subject=principal, operation='authorize_publication_policy', outcome='success',
                     details={'publication_id': item.id, 'request_hash': item.request_hash, 'channel': 'chatgpt_policy',
                              'oauth_client_id': context.oauth_client_id, 'policy_sha256': approval.evidence_hash,
-                             'approval_mode': self.settings.approval_mode,
+                             'approval_mode': active.approval_mode,
                              'native_confirmation_verified': False,
                              'independent_consent_verified': False}))
             if approval and approval.channel == 'chatgpt_policy':
-                if (not self.approval_policy.eligible(principal, item.payload, context)
+                if (not policy.eligible(principal, item.payload, context)
                         or approval.oauth_client_id != context.oauth_client_id
-                        or approval.evidence_hash != self.approval_policy.fingerprint()):
+                        or approval.evidence_hash != policy.fingerprint()):
                     raise HubError('authorization_required', 'ChatGPT policy or authenticated client changed; independent owner authorization required')
             if not approval or approval.principal != principal or approval.request_hash != item.request_hash or approval.expires_at <= self.clock():
                 raise HubError('authorization_required', 'A current exact approval or explicitly enabled authenticated ChatGPT policy is required')
@@ -295,16 +307,33 @@ class PublishingService:
                 return None
             if approval.used_at is None:
                 approval.used_at = self.clock()  # Consumed to this immutable publication, including its resumable steps.
-            return {'lease': lease, 'checkpoint': dict(target.checkpoint), 'payload': item.payload, 'account_id': target.account_id}
+            return {'lease': lease, 'checkpoint': dict(target.checkpoint), 'payload': item.payload, 'account_id': target.account_id, 'approval_channel': approval.channel}
+
+    def execution_settings(self):
+        active = effective_settings(self.settings, self.sessions)
+        if not active.meta_live_writes or not active.publishing_enabled:
+            raise HubError('live_writes_disabled', 'Live publishing remains disabled; preparing a preview does not authorize public writes')
+        return active
+
+    @staticmethod
+    def platforms_enabled(active, request):
+        return all(active._feature_states['facebook_publishing' if aid == 'pixelpapa-facebook' else 'instagram_publishing']['effective'] for aid in request['account_ids'])
+
+    @staticmethod
+    def require_platforms(active, request):
+        for aid in request['account_ids']:
+            name = 'facebook_publishing' if aid == 'pixelpapa-facebook' else 'instagram_publishing'
+            if not active._feature_states[name]['effective']:
+                raise HubError('publishing_feature_disabled', 'Publishing is paused for a selected platform; the immutable preview is preserved')
 
     async def execute(self, principal, scopes, publication_id, context=None):
-        if not self.settings.meta_live_writes or not self.settings.publishing_enabled:
-            raise HubError('live_writes_disabled', 'Live publishing remains disabled; preparing a preview does not authorize public writes')
+        active = self.execution_settings()
         if 'socialhub:publish' not in scopes:
             raise HubError('insufficient_scope', 'The authenticated caller requires socialhub:publish')
         require_publisher(self.settings, principal)
         current = self.review(publication_id, principal)
         require_write_accounts(self.settings, current['preview']['request']['account_ids'])
+        self.require_platforms(active, current['preview']['request'])
         if not self.media_write_allowed(current['preview']['request']):
             raise HubError('facebook_media_publishing_disabled' if 'pixelpapa-facebook' in current['preview']['request']['account_ids'] else 'instagram_reels_publishing_disabled', 'Media publishing is not activated for every selected target; the prepared preview is preserved')
         for target in current['targets']:
@@ -337,6 +366,13 @@ class PublishingService:
                         self.media.reserve_delivery(asset['id'])
                         request['media_url'] = self.media.temporary_url(asset['id'], asset['sha256'])
                 await adapter.validate(account.remote_id, request, payload['assets'])
+                # A disable committed while validation awaited must stop dispatch.
+                fresh = self.execution_settings()
+                self.require_platforms(fresh, request)
+                if not self.media_write_allowed(request):
+                    raise HubError('publishing_feature_disabled', 'Media publishing was paused before dispatch')
+                if claim.get('approval_channel') == 'chatgpt_policy' and not ApprovalPolicy(fresh).eligible(principal, payload, context):
+                    raise HubError('authorization_required', 'Direct publishing was paused before dispatch')
                 sent = True  # From here an exception can mean an ambiguous external outcome.
                 outcome = await adapter.step(account.remote_id, request, checkpoint)
                 self.finish(publication_id, target['target_id'], principal, claim['lease'], outcome)
@@ -345,7 +381,8 @@ class PublishingService:
                 safe_read = checkpoint.get('stage') in {'delivered', 'video_processing'}
                 mutation_attempted = error.diagnostics.get('mutation_attempted', not safe_read)
                 uncertain = sent and mutation_attempted and (error.code in {'write_outcome_unknown', 'api_timeout', 'api_unavailable', 'invalid_api_response'} or (error.code == 'api_error' and error.diagnostics.get('provider_code') not in {10, 200, 299}))
-                retry = (not mutation_attempted and error.retryable) or error.code == 'rate_limited' or (not sent and error.retryable)
+                paused = not sent and error.code in {'live_writes_disabled', 'publishing_feature_disabled', 'authorization_required'}
+                retry = paused or (not mutation_attempted and error.retryable) or error.code == 'rate_limited' or (not sent and error.retryable)
                 state = 'uncertain' if uncertain else 'retryable' if retry else 'failed'
                 self.finish(publication_id, target['target_id'], principal, claim['lease'],
                     {'state': state, 'checkpoint': checkpoint, 'error_code': error.code, 'error_message': error.message[:256],

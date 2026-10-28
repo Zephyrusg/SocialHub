@@ -87,6 +87,8 @@ class Hub:
                 account_type_source = stored.get('account_type_source', 'unknown')
                 caps['write_account_allowed'] = account.id in self.settings.meta_write_account_ids
                 caps['live_writes_enabled'] = bool(caps['write_account_allowed'] and self.settings.meta_live_writes and self.settings.publishing_enabled)
+                runtime = getattr(self.settings, '_feature_states', {})
+                caps['live_writes_enabled'] &= runtime.get(account.platform + '_publishing', {'effective':True})['effective']
                 for kind in ['image', 'video']:
                     caps['publish_' + kind + '_enabled'] = bool(account.platform == 'facebook'
                         and caps.get('publish_post') and caps['live_writes_enabled'] and self.settings.facebook_media_publishing_enabled

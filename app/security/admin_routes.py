@@ -1,4 +1,4 @@
-"""Small server-rendered setup UI. No publication approvals or write-gate switches."""
+"""Server-rendered setup and restrictive feature preferences; no publication consent."""
 import asyncio
 from html import escape
 from urllib.parse import parse_qs
@@ -9,6 +9,7 @@ from app.database.models import Audit
 from app.security.origins import browser_request
 from app.services.administration import Administration, AdminSessions, AdminOIDC
 from app.services.meta_oauth import MetaOAuth
+from app.services.feature_flags import FeatureFlags, FEATURES
 
 COOKIE = '__Secure-socialhub-admin'
 FLOW_COOKIE = '__Secure-socialhub-admin-oidc'
@@ -27,6 +28,7 @@ def register_admin_routes(mcp, settings, sessions):
     browser = AdminSessions(settings, sessions)
     oidc = AdminOIDC(settings, sessions)
     setup = Administration(settings, sessions)
+    flags = FeatureFlags(settings, sessions)
 
     def boundary(request):
         browser.enabled()
@@ -46,6 +48,9 @@ def register_admin_routes(mcp, settings, sessions):
             'invalid_setup': (400, 'Check the Facebook App ID and App Secret format.'),
             'configuration_conflict': (409, 'Setup changed. Reload the page and review before saving again.'),
             'meta_not_connected': (409, 'Save Meta settings, then connect and verify both accounts first.'),
+            'invalid_feature': (400, 'Unsupported feature or invalid setting.'),
+            'feature_unavailable': (403, 'Deployment restrictions prevent enabling this feature.'),
+            'feature_confirmation_required': (400, 'Review the publishing warning before enabling.'),
         }
         status, message = messages.get(code, (503, 'Setup could not complete. Check local readiness and start a fresh login if needed.'))
         if status == 503:logging.getLogger('socialhub').warning('admin_operation_failed')
@@ -115,8 +120,41 @@ def register_admin_routes(mcp, settings, sessions):
             body += '<form method="post" action="/admin/meta/settings">' + hidden + '<label>Facebook App ID <input required name="app_id" maxlength="64" value="' + escape(status['meta_app_id'], quote=True) + '"></label><label>App Secret <input type="password" name="app_secret" maxlength="256" autocomplete="new-password"></label><p>Leave the secret blank to keep the current value. Changing credentials disables reads and requires a fresh account connection.</p><button>Save Meta settings</button></form>'
             body += '<form method="post" action="/admin/meta/connect">' + hidden + '<button>Connect Facebook and Instagram</button></form>'
             body += '<p>Live account reads: ' + ('enabled' if status['live_reads'] else 'disabled') + '.</p><form method="post" action="/admin/meta/reads">' + hidden + '<input type="hidden" name="enabled" value="' + ('false' if status['live_reads'] else 'true') + '"><button>' + ('Disable' if status['live_reads'] else 'Enable verified') + ' account reads</button></form>'
-            body += '<p>Identity roles, encryption keys, public origins and write activation are managed through protected operator configuration.</p><form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="' + csrf + '"><button>Sign out</button></form>'
+            feature_status = await asyncio.to_thread(flags.status, subject)
+            body += '<h2>Feature Flags</h2><p>Configured preferences persist immediately. Deployment restrictions are hard limits; enabling a feature never approves a post. Disabling stops new execution, but cannot recall requests already sent to Meta. Read-only reconciliation remains available.</p>'
+            body += '<table><thead><tr><th scope="col">Feature</th><th scope="col">Configured</th><th scope="col">Available</th><th scope="col">Effective</th><th scope="col">Control</th></tr></thead><tbody>'
+            for feature in feature_status['features']:
+                configured = 'Inherit deployment' if feature['configured'] is None else ('On' if feature['configured'] else 'Off')
+                on = feature['effective']
+                # Allow an explicitly paused preference to be resumed even when
+                # another runtime dependency is off; effective state stays off.
+                requested = feature['configured'] if feature['configured'] is not None else True
+                desired = not requested
+                body += '<tr><th scope="row">' + escape(feature['label']) + '<p>' + escape(feature['description']) + '</p></th><td>' + configured + '</td><td>' + ('Yes' if feature['available'] else 'No') + '</td><td>' + ('On' if on else 'Off') + '<p>' + escape(feature['reason']) + '</p></td><td>'
+                if feature['available']:
+                    body += '<form method="post" action="/admin/features"><input type="hidden" name="csrf" value="' + csrf + '"><input type="hidden" name="revision" value="' + str(feature_status['revision']) + '"><input type="hidden" name="feature" value="' + feature['name'] + '"><input type="hidden" name="enabled" value="' + ('true' if desired else 'false') + '"><input type="hidden" name="confirmation" value="no"><button role="switch" aria-checked="' + ('true' if requested else 'false') + '" aria-label="' + escape(feature['label'], quote=True) + '">' + ('Enable' if desired else 'Disable') + '</button></form>'
+                else:body += '<button disabled aria-label="' + escape(feature['label'], quote=True) + '">Unavailable</button>'
+                body += '</td></tr>'
+            body += '</tbody></table><p>Identity roles, account allowlists, encryption keys, public origins and deployment ceilings remain protected operator configuration.</p><form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="' + csrf + '"><button>Sign out</button></form>'
             return page(body)
+        except Exception as exc:return error(exc)
+
+    @mcp.custom_route('/admin/features', methods=['POST'])
+    async def features(request):
+        try:
+            subject, values = await form(request, {'csrf', 'revision', 'feature', 'enabled', 'confirmation'})
+            name = values['feature']
+            if name not in FEATURES or name == 'scheduling' or values['enabled'] not in {'true', 'false'} or values['confirmation'] not in {'yes', 'no'}:
+                raise HubError('invalid_feature', 'Invalid feature form')
+            enabled = values['enabled'] == 'true'
+            if enabled and FEATURES[name][2] and values['confirmation'] != 'yes':
+                current = await asyncio.to_thread(flags.status, subject)
+                if current['revision'] != values['revision']:raise HubError('configuration_conflict', 'Features changed')
+                if not next(f for f in current['features'] if f['name'] == name)['available']:raise HubError('feature_unavailable', 'Feature unavailable')
+                hidden = ''.join('<input type="hidden" name="' + key + '" value="' + escape(str(value), quote=True) + '">' for key, value in (values | {'confirmation':'yes'}).items())
+                return page('<h2>Enable ' + escape(FEATURES[name][0]) + '?</h2><p>This allows the corresponding write workflow within deployment restrictions. It does not approve any content. Existing authentication, account restrictions, immutable previews and approval policy still apply. ChatGPT direct mode relies on an authenticated chat instruction; the server cannot independently verify user consent.</p><form method="post" action="/admin/features">' + hidden + '<button>Confirm enable</button></form><a href="/admin/">Cancel</a>')
+            await asyncio.to_thread(flags.save, subject, values['revision'], name, enabled, acknowledged=values['confirmation'] == 'yes')
+            return RedirectResponse('/admin/', status_code=303, headers=HEADERS)
         except Exception as exc:return error(exc)
 
     @mcp.custom_route('/admin/meta/settings', methods=['POST'])

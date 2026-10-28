@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     admin_allowed_subjects: list[str] = []
     publishing_allowed_subjects: list[str] = []
     _meta_configuration_revision: int | None = PrivateAttr(default=None)
+    _feature_configuration_revision: int = PrivateAttr(default=0)
+    _feature_states: dict = PrivateAttr(default_factory=dict)
+    _deployment_settings: object | None = PrivateAttr(default=None)
     media_delivery_enabled: bool = True
     media_root: str = '/data/media'
 

@@ -281,7 +281,8 @@ def create_server(settings=None):
 
     @mcp.custom_route('/healthz', methods=['GET'])
     async def health(request):
-        return JSONResponse({'status': 'ok', 'mode': 'live_guarded_publishing' if settings.meta_live_writes and settings.publishing_enabled else 'live_read_only' if settings.meta_live_reads else 'mock'})
+        current = active.snapshot()
+        return JSONResponse({'status': 'ok', 'mode': 'live_guarded_publishing' if current.meta_live_writes and current.publishing_enabled else 'live_read_only' if current.meta_live_reads else 'mock'})
 
     @mcp.custom_route('/readyz', methods=['GET'])
     async def ready(request):
@@ -302,9 +303,9 @@ def create_server(settings=None):
         return PlainTextResponse('\n'.join(f'socialhub_operations_total{{outcome="{key}"}} {value}' for key, value in counters.items()) + '\n')
 
     from app.security.media_routes import register_media_routes
-    register_media_routes(mcp, settings, sessions)
+    register_media_routes(mcp, active, sessions)
     from app.security.attachment_tools import register_attachment_tools
-    register_attachment_tools(mcp, settings, sessions)
+    register_attachment_tools(mcp, active, sessions)
     from app.security.meta_routes import register_meta_routes
     register_meta_routes(mcp, active, sessions)
     from app.security.approval_routes import register_approval_routes

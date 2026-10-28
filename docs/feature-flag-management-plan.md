@@ -35,3 +35,13 @@ Implementation should start in WSL with authorization/configuration tests and a
 reviewed deployment/rollback plan. Production changes and any live social-media
 test need explicit authorization. No feature activation or additional post is
 authorized by this planning document.
+
+## Phase 3D.1 implementation
+
+The initial management section is implemented in WSL. See
+[feature flags](feature-flags.md) for the current switches, hard deployment
+ceilings, encrypted persistence, revision/audit handling, dynamic enforcement and
+rollback requirements. This replaces the proposed design above where implemented.
+AI disclosure remains supported per immutable Reel; its deployment default is a
+separate content preference and is not a publishing activation switch.
+Production deployment and changes to its ceilings remain separately authorized.

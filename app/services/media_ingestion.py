@@ -8,6 +8,7 @@ from app.database.models import Idempotency, Audit, Media
 from app.services.media_manager import MediaManager
 from app.services.media_budget import MediaBudget
 from app.services.attachment_download import AttachmentDownloader, attachment_host
+from app.services.administration import EffectiveSettings
 
 
 async def validation_thread(fn, *args, **kwargs):
@@ -23,6 +24,7 @@ async def validation_thread(fn, *args, **kwargs):
 
 class MediaIngestion:
     def __init__(self, settings, sessions, downloader=None):
+        settings = settings if isinstance(settings, EffectiveSettings) else EffectiveSettings(settings, sessions)
         self.settings, self.sessions = settings, sessions
         self.manager = MediaManager(settings, sessions)
         self.budget = MediaBudget(settings, sessions)
