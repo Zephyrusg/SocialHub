@@ -1,4 +1,7 @@
 import logging
+import asyncio
+from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 from typing import Annotated, Any, Literal
 from pydantic import Field, AnyHttpUrl
 from urllib.parse import urlsplit
@@ -35,6 +38,25 @@ def create_server(settings=None):
     active = EffectiveSettings(settings, sessions)
     hub = Hub(sessions, active)
     publishing = PublishingService(active, sessions)
+    @asynccontextmanager
+    async def media_lifespan(_):
+        from app.services.media_budget import MediaBudget
+        async def janitor():
+            while True:
+                await asyncio.sleep(settings.media_cleanup_interval_seconds)
+                try:
+                    await asyncio.to_thread(MediaBudget(settings, sessions).cleanup)
+                except Exception:
+                    # Active transfer locks and transient storage/DB failures are retried next interval.
+                    pass
+        retained = (Path(settings.media_root) / '.retention-enabled').exists()
+        task = asyncio.create_task(janitor()) if settings.media_ingestion_enabled or settings.media_attachment_probe_enabled or retained else None
+        try:
+            yield {}
+        finally:
+            if task:
+                task.cancel()
+                with suppress(asyncio.CancelledError): await task
     mcp = FastMCP('SocialHub', host='0.0.0.0', port=8000, stateless_http=True, json_response=False,
                   auth=AuthSettings(issuer_url=AnyHttpUrl(settings.oauth_issuer), resource_server_url=AnyHttpUrl(settings.public_url), required_scopes=['socialhub:read'], validate_token_resource=True),
                   token_verifier=Verifier(settings),
@@ -45,6 +67,15 @@ def create_server(settings=None):
     original_app = mcp.streamable_http_app
     def secured_app():
         app = original_app()
+        sdk_lifespan = app.router.lifespan_context
+        @asynccontextmanager
+        async def managed_lifespan(application):
+            async with sdk_lifespan(application) as state:
+                async with media_lifespan(application):
+                    yield state
+        # Stateless MCP request lifespans end after each request; retention must
+        # run for the ASGI application's entire lifetime, including idle periods.
+        app.router.lifespan_context = managed_lifespan
         # AnyHttpUrl normalizes an issuer authority to a trailing slash. OIDC
         # issuer identifiers are exact strings; keep the SDK's native route and
         # challenge but preserve the operator's discovery-verified identifier.
@@ -224,7 +255,17 @@ def create_server(settings=None):
         if get_access_token() is None:
             return {'ok': False, 'error': {'code': 'unauthenticated'}}
         with sessions() as db:
-            return {'ok': True, 'data': {'media': [publishing.media.describe(m) for m in db.scalars(select(Media).limit(limit)) if m.metadata_json.get('validated') and get_access_token().client_id in m.metadata_json.get('owners', [])]}}
+            from app.database.models import utcnow
+            from sqlalchemy import or_
+            rows = db.scalars(select(Media).where(
+                or_(Media.expires_at.is_(None), Media.expires_at > utcnow()),
+                Media.metadata_json['_bytes_deleted'].as_boolean().is_not(True)).execution_options(yield_per=32))
+            assets = []
+            for item in rows:
+                if item.metadata_json.get('validated') and get_access_token().client_id in item.metadata_json.get('owners', []):
+                    assets.append(publishing.media.describe(item))
+                    if len(assets) >= limit: break
+            return {'ok': True, 'data': {'media': assets}}
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read']}]})
     async def get_media(media_id: Short) -> dict[str, Any]:
@@ -260,6 +301,8 @@ def create_server(settings=None):
 
     from app.security.media_routes import register_media_routes
     register_media_routes(mcp, settings, sessions)
+    from app.security.attachment_tools import register_attachment_tools
+    register_attachment_tools(mcp, settings, sessions)
     from app.security.meta_routes import register_meta_routes
     register_meta_routes(mcp, active, sessions)
     from app.security.approval_routes import register_approval_routes

@@ -32,7 +32,7 @@ is subsequently disabled or an owner grant expires, because it cannot mutate
 remote content or mint another grant.
 
 Prepared, failed, uncertain and actively sending targets are not automatically
-advanced. Video-processing and Instagram-container stages retain their existing
-explicit workflow; this finalizer only handles acknowledged deliveries. Unknown
+advanced. Acknowledged Facebook video uploads can also poll processing state with GET-only
+status refresh. Instagram-container and Reel stages retain their explicit workflow. Unknown
 write outcomes still require the independent verified reconciliation process.
 Never create a new idempotency key to work around a pending or uncertain result.

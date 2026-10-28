@@ -80,7 +80,7 @@ async def test_authenticated_stream_upload_and_private_download(tmp_path):
     from app.main import create_server
     url=f'sqlite:///{tmp_path}/http.db'
     engine,_=database(url);Base.metadata.create_all(engine)
-    s=Settings(_env_file=None,database_url=url,local_token='a'*64,encryption_key=Fernet.generate_key().decode(),media_root=str(tmp_path/'media'))
+    s=Settings(_env_file=None,database_url=url,local_token='a'*64,encryption_key=Fernet.generate_key().decode(),media_root=str(tmp_path/'media'),media_ingestion_enabled=True)
     app=create_server(s).streamable_http_app()
     content=BytesIO(Path('tests/fixtures/portrait.jpg').read_bytes())
     async with app.router.lifespan_context(app):

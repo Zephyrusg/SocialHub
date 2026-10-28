@@ -18,7 +18,7 @@ Local operational documents and personal test records may live in `private/`. Bo
 
 ## Media limitation
 
-Authenticated uploads have a per-file byte cap and validation checks, but admission concurrency, total storage quota, receive deadlines and stale-file retention need hardening. The current semaphore applies to validation after a request body has been received. Keep production media disabled and the upload route blocked until those controls are implemented and tested. Only small JPEG/PNG images and a narrow metadata-validated MP4 subset are supported. No transcoding is performed.
+Authenticated media ingestion now has cross-process admission before receiving bytes, per-file/storage/file-count/free-space limits, whole-transfer deadlines and automatic expiry/orphan cleanup. Attachment receivers pin public DNS addresses, verify TLS hostnames, reject redirects and never forward OAuth credentials. Input-schema validation hides capability URLs. JPEG/PNG decoding is pixel-bounded; MP4 validation uses a resource-limited metadata-only ffprobe worker. These controls are covered by synthetic tests, but actual ChatGPT image/MP4 transfer and controlled live Meta media acceptance remain activation gates. Keep production media flags/routes off until the required checks and explicit authorization. See [Facebook media](facebook-media.md).
 
 ## Proxy and deployment controls
 

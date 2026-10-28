@@ -74,9 +74,29 @@ class MetaPublishingConnector:
         info = await self.read(state['remote_id'], {'fields': fields})
         return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': info.get('permalink') or info.get('permalink_url') or info.get('link')}}
 
+    async def refresh_delivery(self, account_id, request, checkpoint):
+        self.connector.check_account(account_id)
+        if checkpoint.get('stage') == 'delivered':
+            return await self.finalize_delivery(account_id, request, checkpoint)
+        if (self.platform != 'facebook' or request['operation'] != 'publish'
+                or request['content_type'] != 'video' or checkpoint.get('stage') != 'video_processing'):
+            raise HubError('unsupported_operation', 'Only acknowledged Facebook video uploads or deliveries can be polled read-only')
+        state = dict(checkpoint)
+        info = await self.read(state['remote_id'], {'fields': 'id,status,permalink_url'})
+        status = (info.get('status') or {}).get('video_status')
+        if status == 'error':
+            raise HubError('media_processing_failed', 'Meta video processing failed; inspect this remote object instead of uploading a replacement')
+        if status != 'ready':
+            state['polls'] = min(int(state.get('polls', 0)) + 1, 60)
+            return {'state': 'processing', 'checkpoint': state, 'retry_after': 60 if state['polls'] < 60 else 300}
+        return {'state': 'succeeded', 'checkpoint': state,
+                'result': {'remote_id': state['remote_id'], 'permalink': info.get('permalink_url')}}
+
     async def step(self, account_id, request, checkpoint):
         if checkpoint.get('stage') == 'delivered':
             return await self.finalize_delivery(account_id, request, checkpoint)
+        if checkpoint.get('stage') == 'video_processing' and request['content_type'] == 'video':
+            return await self.refresh_delivery(account_id, request, checkpoint)
         self.connector.write_guard(account_id)
         operation, kind, text = request['operation'], request['content_type'], request['text']
         state = dict(checkpoint)

@@ -66,6 +66,19 @@ class Settings(BaseSettings):
     approval_portal_enabled: bool = False
     media_public_base_url: str = ''
     media_max_bytes: int = 100 * 1024 * 1024
+    media_ingestion_enabled: bool = False
+    media_attachment_probe_enabled: bool = False
+    media_download_hosts: list[str] = []
+    media_storage_max_bytes: int = 512 * 1024 * 1024
+    media_storage_max_files: int = 16
+    media_min_free_bytes: int = 64 * 1024 * 1024
+    media_retention_seconds: int = 86400
+    media_receive_timeout_seconds: int = 120
+    media_cleanup_interval_seconds: int = 60
+    media_stale_upload_seconds: int = 600
+    media_image_max_pixels: int = 16_000_000
+    facebook_media_publishing_enabled: bool = False
+    facebook_media_allowed_types: list[Literal['image', 'video', 'reel']] = ['image', 'video']
 
     @model_validator(mode='after')
     def secure_defaults(self):
@@ -118,6 +131,25 @@ class Settings(BaseSettings):
                 raise ValueError('Media delivery requires an explicit HTTPS base URL without credentials/query')
         if not 1 <= self.media_max_bytes <= 512 * 1024 * 1024:
             raise ValueError('Invalid media size limit')
+        if (not self.media_max_bytes <= self.media_storage_max_bytes <= 10 * 1024**3
+                or not 1 <= self.media_storage_max_files <= 256
+                or not 0 <= self.media_min_free_bytes <= 1024**3
+                or not 3600 <= self.media_retention_seconds <= 172800
+                or not 1 <= self.media_receive_timeout_seconds <= 600
+                or not 10 <= self.media_cleanup_interval_seconds <= 3600
+                or not 60 <= self.media_stale_upload_seconds <= 3600
+                or not 1 <= self.media_image_max_pixels <= 20_000_000):
+            raise ValueError('Invalid bounded media resource settings')
+        for host in self.media_download_hosts:
+            if (not host or host != host.lower() or host.endswith('.') or '*' in host
+                    or any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789.-' for c in host)):
+                raise ValueError('Media download hosts must be exact lowercase DNS names')
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                pass
+            else:
+                raise ValueError('Media download hosts cannot be IP literals')
         if self.meta_redirect_uri != self.browser_origin + '/meta/oauth/callback':
             raise ValueError('Meta callback must exactly match the trusted browser origin and native callback path')
         return self

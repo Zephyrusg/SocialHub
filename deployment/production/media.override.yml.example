@@ -1,0 +1,27 @@
+# Optional reviewed override; not an instruction to activate production media.
+# Set an existing, private HDD directory. Verify its mount before startup.
+services:
+  socialhub:
+    volumes:
+      - type: bind
+        source: ${SOCIALHUB_MEDIA_DIRECTORY:?Set the reviewed private media directory}
+        target: /data/media
+        bind:
+          create_host_path: false
+    environment:
+      MEDIA_ROOT: /data/media
+      MEDIA_INGESTION_ENABLED: 'false'
+      MEDIA_ATTACHMENT_PROBE_ENABLED: 'false'
+      MEDIA_DOWNLOAD_HOSTS: '[]'
+      MEDIA_DELIVERY_ENABLED: 'false'
+      FACEBOOK_MEDIA_PUBLISHING_ENABLED: 'false'
+      FACEBOOK_MEDIA_ALLOWED_TYPES: '["image","video"]'
+      MEDIA_MAX_BYTES: '104857600'
+      MEDIA_STORAGE_MAX_BYTES: '536870912'
+      MEDIA_STORAGE_MAX_FILES: '16'
+      MEDIA_MIN_FREE_BYTES: '67108864'
+      MEDIA_RETENTION_SECONDS: '86400'
+      MEDIA_RECEIVE_TIMEOUT_SECONDS: '120'
+      MEDIA_CLEANUP_INTERVAL_SECONDS: '60'
+      MEDIA_STALE_UPLOAD_SECONDS: '600'
+      MEDIA_IMAGE_MAX_PIXELS: '16000000'

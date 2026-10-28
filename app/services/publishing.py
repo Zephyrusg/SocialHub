@@ -107,6 +107,11 @@ class PublishingService:
             raise HubError('preview_changed', 'Stored preview changed after preparation; execution is refused')
         return item
 
+    def media_write_allowed(self, request):
+        return (not request['media_ids'] or 'pixelpapa-facebook' not in request['account_ids']
+                or (self.settings.facebook_media_publishing_enabled and self.settings.media_delivery_enabled
+                    and request['content_type'] in self.settings.facebook_media_allowed_types))
+
     def review(self, publication_id, principal):
         with self.sessions() as db:
             item = self.checked(db, publication_id, principal)
@@ -126,6 +131,7 @@ class PublishingService:
             return {'publication_id': item.id, 'request_hash': item.request_hash, 'principal': item.principal,
                 'preview': item.payload, 'state': state, 'requires_owner_approval': not bool(approval and approval.expires_at > self.clock()),
                 'live_writes_enabled': bool(self.settings.meta_live_writes and self.settings.publishing_enabled
+                    and self.media_write_allowed(item.payload['request'])
                     and all(aid in self.settings.meta_write_account_ids for aid in item.payload['request']['account_ids'])),
                 'approval_channel': approval.channel if approval else None,
                 'independent_owner_approval': bool(approval and approval.channel in {'owner_cli', 'owner_portal'} and approval.expires_at > self.clock()),
@@ -192,7 +198,8 @@ class PublishingService:
             result['owner_grant_valid'] = bool(owner_valid)
             result['current_grant_valid'] = bool(owner_valid or policy_valid)
             result['write_accounts_allowed'] = all(aid in self.settings.meta_write_account_ids for aid in item.payload['request']['account_ids'])
-            result['live_writes_enabled'] = bool(result['write_accounts_allowed'] and self.settings.meta_live_writes and self.settings.publishing_enabled)
+            result['media_write_allowed'] = self.media_write_allowed(item.payload['request'])
+            result['live_writes_enabled'] = bool(result['media_write_allowed'] and result['write_accounts_allowed'] and self.settings.meta_live_writes and self.settings.publishing_enabled)
             if grant and not (owner_valid or policy_valid):
                 result.update(independent_owner_required=True, execution_channel='independent_owner',
                               next_step='The prior grant expired, was revoked, or no longer matches policy. A fresh independent owner decision is required; do not retry or mint a replacement automatically.')
@@ -256,7 +263,15 @@ class PublishingService:
         require_publisher(self.settings, principal)
         current = self.review(publication_id, principal)
         require_write_accounts(self.settings, current['preview']['request']['account_ids'])
+        if not self.media_write_allowed(current['preview']['request']):
+            raise HubError('facebook_media_publishing_disabled', 'Facebook media publishing is not activated; the text workflow and prepared preview are preserved')
         for target in current['targets']:
+            if (target['state'] in {'processing', 'retryable'}
+                    and target['checkpoint'].get('stage') in {'delivered', 'video_processing'}
+                    and isinstance(self.context(target['account_id'], execute=False)[2], MetaPublishingConnector)):
+                # Acknowledged work needs only status reads, not another claim,
+                # source-file check, upload URL or publication attempt.
+                continue
             claim = self.claim(publication_id, target['target_id'], principal, context)
             if claim is None:
                 continue
@@ -272,6 +287,7 @@ class PublishingService:
                     raise HubError('permission_denied', 'Account permission or Page task no longer permits this operation')
                 for asset in payload['assets']:
                     self.media.path(asset['id'], asset['sha256'])
+                    self.media.reserve_delivery(asset['id'])
                     # Metadata participates in the preview hash; on-disk bytes are rechecked before each step.
                     request['media_url'] = self.media.temporary_url(asset['id'], asset['sha256'])
                 await adapter.validate(account.remote_id, request, payload['assets'])
@@ -298,12 +314,12 @@ class PublishingService:
         preview = self.review(publication_id, principal)
         for snapshot in preview['targets']:
             if (snapshot['state'] not in {'processing', 'retryable'}
-                    or snapshot['checkpoint'].get('stage') != 'delivered'):
+                    or snapshot['checkpoint'].get('stage') not in {'delivered', 'video_processing'}):
                 continue
             with self.sessions() as db:
                 current = db.get(PublicationTarget, snapshot['target_id'])
                 if (not current or current.state != snapshot['state'] or current.lease_token is not None
-                        or current.checkpoint.get('stage') != 'delivered'):
+                        or current.checkpoint.get('stage') not in {'delivered', 'video_processing'}):
                     continue
                 if current.next_attempt_at and current.next_attempt_at > self.clock():
                     continue
@@ -312,7 +328,7 @@ class PublishingService:
                 account, _, adapter = self.context(snapshot['account_id'], execute=False)
                 if not isinstance(adapter, MetaPublishingConnector):
                     continue
-                outcome = await adapter.finalize_delivery(account.remote_id, preview['preview']['request'], checkpoint)
+                outcome = await adapter.refresh_delivery(account.remote_id, preview['preview']['request'], checkpoint)
                 error = None
             except HubError as caught:
                 error = caught
@@ -327,7 +343,15 @@ class PublishingService:
                 if error is not None:
                     target.error_code, target.error_message = error.code, error.message[:256]
                     target.next_attempt_at = self.clock() + timedelta(seconds=60)
+                    if checkpoint.get('stage') == 'video_processing' and error.code == 'media_processing_failed':
+                        target.state, target.next_attempt_at = 'failed', None
                     # Keep the acknowledgement; a missing permalink is not a failed post.
+                    continue
+                if outcome['state'] == 'processing':
+                    target.state = 'processing'
+                    target.checkpoint = outcome['checkpoint']
+                    target.error_code, target.error_message = None, None
+                    target.next_attempt_at = self.clock() + timedelta(seconds=outcome.get('retry_after', 60))
                     continue
                 target.state, target.result = 'succeeded', outcome['result']
                 target.error_code, target.error_message, target.next_attempt_at = None, None, None

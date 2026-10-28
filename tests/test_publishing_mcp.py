@@ -36,7 +36,7 @@ async def test_mcp_prepare_approve_execute_and_legacy_preview(tmp_path,monkeypat
             await rpc('initialize',{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'pytest','version':'1'}})
             tools=await rpc('tools/list',{})
             names={t['name'] for t in tools['tools']}
-            assert len(names)==17
+            assert len(names)==19
             assert 'get_approval_requirements' in names
             assert not any('approve' in n or 'reconcile' in n for n in names)
             async def call(name,args):

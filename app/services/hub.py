@@ -87,6 +87,11 @@ class Hub:
                 account_type_source = stored.get('account_type_source', 'unknown')
                 caps['write_account_allowed'] = account.id in self.settings.meta_write_account_ids
                 caps['live_writes_enabled'] = bool(caps['write_account_allowed'] and self.settings.meta_live_writes and self.settings.publishing_enabled)
+                for kind in ['image', 'video']:
+                    caps['publish_' + kind + '_enabled'] = bool(account.platform == 'facebook'
+                        and caps.get('publish_post') and caps['live_writes_enabled'] and self.settings.facebook_media_publishing_enabled
+                        and self.settings.media_delivery_enabled and self.settings.media_public_base_url
+                        and kind in self.settings.facebook_media_allowed_types)
                 if account.platform == 'instagram' and account_type_source != 'api_returned':
                     caps['stories'] = False
             if operation == 'get_account_capabilities':
