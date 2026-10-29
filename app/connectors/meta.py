@@ -35,7 +35,8 @@ class GraphClient:
         attempts = 3 if safe_retry else 1  # Never blindly retry public writes.
         # Meta may fetch/process a remote media URL before acknowledging the POST.
         # The old ten-second read limit could expire after the photo was published.
-        media_post = method == 'POST' and path.rsplit('/', 1)[-1] in {'photos', 'videos'}
+        # Instagram's final media_publish acknowledgement can also arrive late.
+        media_post = method == 'POST' and path.rsplit('/', 1)[-1] in {'photos', 'videos', 'media_publish'}
         timeout = httpx.Timeout(120 if media_post else 10, connect=10,
             write=30 if media_post else 10, pool=10)
         async with httpx.AsyncClient(base_url=self.base_url, transport=self.transport, timeout=timeout, follow_redirects=False) as client:

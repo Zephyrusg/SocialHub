@@ -502,6 +502,19 @@ class PublishingService:
             if not approval or not approval.used_at or target.attempts < 1:
                 raise HubError('reconciliation_denied', 'A recorded authorized execution is required')
             aid, created, attempts = target.account_id, approval.used_at, target.attempts
+            checkpoint = dict(target.checkpoint)
+            finish_attempt = None
+            if item.payload['request']['content_type'] == 'reel' and aid == 'pixelpapa-instagram':
+                if approval.request_hash != item.request_hash:
+                    raise HubError('reconciliation_denied', 'The recorded authorization does not match this immutable preview')
+                for event in db.scalars(select(Audit).where(Audit.operation == 'execute_publication',
+                        Audit.account_id == aid, Audit.outcome == 'uncertain').order_by(Audit.at.desc()).limit(100)):
+                    detail = event.details
+                    if (detail.get('publication_id') == publication_id and detail.get('target_id') == target_id
+                            and detail.get('stage') == 'ig_reel_ready'
+                            and detail.get('container_id') == checkpoint.get('container_id')):
+                        finish_attempt = event.at
+                        break
         request = preview['preview']['request']
         account, _, adapter = self.context(aid, execute=False)
         # Reconciliation is a connector read operation, not a generic remote-ID acceptance.
@@ -511,10 +524,19 @@ class PublishingService:
             raise HubError('manual_check_required', 'Reply outcome needs a parent-bound reply reader; no automatic resend is allowed')
         if request['operation'] == 'update' and remote_id != request['post_id']:
             raise HubError('reconciliation_denied', 'An edit can only reconcile its original owned post ID')
-        if request['operation'] == 'publish' and request['content_type'] not in {'text', 'link', 'image'}:
+        instagram_reel = request['operation'] == 'publish' and request['content_type'] == 'reel' and account.platform == 'instagram'
+        if request['operation'] == 'publish' and request['content_type'] not in {'text', 'link', 'image'} and not instagram_reel:
             raise HubError('manual_check_required', 'Video/Reel reconciliation requires verified processing evidence; no resend is allowed')
-        post = await adapter.connector.get_post(account.remote_id, remote_id)
-        if (post.get('message') if account.platform == 'facebook' else post.get('caption')) != request['text']:
+        if instagram_reel:
+            from app.services.reel_reconciliation import verified_instagram_reel
+            post = await verified_instagram_reel(adapter, account.remote_id, request, checkpoint,
+                                                  remote_id, created, finish_attempt)
+        else:
+            post = await adapter.connector.get_post(account.remote_id, remote_id)
+        remote_text = post.get('message') if account.platform == 'facebook' else post.get('caption')
+        if instagram_reel and remote_text is None:
+            remote_text = ''
+        if remote_text != request['text']:
             raise HubError('reconciliation_denied', 'Remote text does not match the approved publication')
         if request['content_type'] == 'image':
             photos = (post.get('attachments') or {}).get('data', [])
@@ -532,7 +554,8 @@ class PublishingService:
             target = db.scalar(select(PublicationTarget).where(PublicationTarget.id == target_id).with_for_update())
             if (item.request_hash != preview['request_hash'] or not target or target.state != 'uncertain'
                     or target.publication_id != publication_id or target.account_id != aid
-                    or target.attempts != attempts or target.lease_token is not None):
+                    or target.attempts != attempts or target.lease_token is not None
+                    or target.checkpoint != checkpoint):
                 raise HubError('reconciliation_denied', 'Target state changed during reconciliation')
             cached = db.scalar(select(Post).where(Post.account_id == aid, Post.remote_id == remote_id))
             if cached and cached.content.get('publication_id') != publication_id:
@@ -540,11 +563,16 @@ class PublishingService:
             target.state = 'succeeded'
             target.result = {'remote_id': remote_id, 'permalink': adapter.permalink(post), 'reconciled': True}
             target.checkpoint = {'stage': 'delivered', 'remote_id': remote_id, 'reconciled': True}
+            if instagram_reel:
+                target.checkpoint = dict(checkpoint, **target.checkpoint)
             target.error_code, target.error_message, target.next_attempt_at = None, None, None
             self.remember_post(db, publication_id, target)
             details = {'publication_id': publication_id, 'remote_id': remote_id,
                 'request_hash': item.request_hash, 'mutation_attempted': False, 'attempts_unchanged': True}
             if request['content_type'] == 'image':
                 details['media_evidence'] = 'owner-selected remote ID, caption, execution time and single photo; remote bytes not hash-equated'
+            if instagram_reel:
+                details.update(container_id=checkpoint['container_id'], previous_stage=checkpoint['stage'],
+                    media_evidence='PUBLISHED saved container and unique account-owned Reel with exact caption and bounded execution time; remote bytes not hash-equated')
             db.add(Audit(subject=issuer, operation='reconcile_publication', account_id=aid, outcome='success', details=details))
         return self.review(publication_id, None)

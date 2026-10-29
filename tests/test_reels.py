@@ -70,7 +70,7 @@ class ReelMeta:
             'permalink_url': '/reel/101/' if self.permalink_ready else None})
 
 
-async def setup_reels(publisher, accounts=None):
+async def setup_reels(publisher, accounts=None, *, caption='Exact Reel caption'):
     service, _, _, now = publisher
     meta = ReelMeta()
     adapters = {p: adapter(p, meta)[0] for p in ('facebook', 'instagram')}
@@ -80,7 +80,7 @@ async def setup_reels(publisher, accounts=None):
     service.settings.media_public_base_url = ''
     asset = service.media.save(Path('tests/fixtures/reel-h264-aac-5s.mp4'), 'alice')
     preview = await service.prepare('alice', 'reel-one', {'account_ids': accounts or ['pixelpapa-facebook', 'pixelpapa-instagram'],
-        'content_type': 'reel', 'text': 'Exact Reel caption', 'media_ids': [asset['id']]})
+        'content_type': 'reel', 'text': caption, 'media_ids': [asset['id']]})
     approve(service, preview)
     async def execute():
         return await service.execute('alice', ['socialhub:publish'], preview['publication_id'])
