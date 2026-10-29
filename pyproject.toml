@@ -31,4 +31,4 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.setuptools.package-data]
-app = ["static/admin.css", "static/admin.js"]
+app = ["static/admin.css", "static/admin.js", "static/fonts/*.ttf", "static/fonts/*.txt"]

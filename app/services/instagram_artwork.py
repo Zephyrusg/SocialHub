@@ -1,14 +1,14 @@
 """Deterministic image derivatives. Music selection and Story publication stay in Instagram."""
 import hashlib
 import json
-import textwrap
-from PIL import Image, ImageOps, ImageDraw, ImageFont
+from PIL import Image, ImageOps
 from app.core import HubError
 from app.database.models import Idempotency, Audit
 from app.services.administration import EffectiveSettings, require_publisher
 from app.services.media_manager import MediaManager
 from app.services.media_budget import MediaBudget
 from app.services.media_ingestion import validation_thread
+from app.services.story_templates import STORY_PROFILE, render_cinematic
 
 ARTIST = 'PixelPapa'
 TITLE = "It's Dangerous to Go Alone"
@@ -48,14 +48,16 @@ class InstagramArtwork:
         if mime not in {'image/jpeg', 'image/png'}:
             raise HubError('invalid_media', 'Choose an imported JPEG or PNG cover image')
         identity = 'ig-art:' + hashlib.sha256((principal + ':' + key).encode()).hexdigest()
-        digest = hashlib.sha256(json.dumps([media_id, asset['sha256'], purpose, announcement, 'v1']).encode()).hexdigest()
+        profile = STORY_PROFILE if purpose == 'story' else 'v1'
+        digest = hashlib.sha256(json.dumps([media_id, asset['sha256'], purpose, announcement, profile]).encode()).hexdigest()
+        legacy_digest = hashlib.sha256(json.dumps([media_id, asset['sha256'], purpose, announcement, 'v1']).encode()).hexdigest()
         def cached():
             with self.sessions() as db:
                 row = db.get(Idempotency, identity)
                 if row is None:return None
-                if row.subject != principal or row.request_hash != digest:
+                if row.subject != principal or row.request_hash not in {digest, legacy_digest}:
                     raise HubError('idempotency_conflict', 'Artwork key is already bound to different inputs')
-                return self.result(self.media.get(row.response['media_id'], principal), purpose, announcement, True)
+                return self.result(self.media.get(row.response['media_id'], principal), purpose, announcement, True, row.response.get('render_profile', 'v1'))
         previous = cached()
         if previous:return previous
         with self.budget.upload() as destination:
@@ -73,34 +75,22 @@ class InstagramArtwork:
                 image = ImageOps.contain(image, canvas.size, Image.Resampling.LANCZOS)
                 canvas.paste(image, ((1080-image.width)//2, (height-image.height)//2))
             else:
-                canvas = Image.new('RGB', (1080, 1920), '#121622')
-                image = ImageOps.contain(image, (920, 1080), Image.Resampling.LANCZOS)
-                canvas.paste(image, ((1080-image.width)//2, 400+(1080-image.height)//2))
-                if announcement:
-                    draw = ImageDraw.Draw(canvas)
-                    font = ImageFont.load_default(size=40)
-                    lines = textwrap.wrap(announcement, width=35)
-                    if len(lines) > 4:
-                        raise HubError('invalid_request', 'Shorten the announcement to fit four lines')
-                    for i, line in enumerate(lines):
-                        if draw.textbbox((0, 0), line, font=font)[2] > 920:
-                            raise HubError('invalid_request', 'Shorten the announcement to fit the Story')
-                        draw.text((540, 1510+i*52), line, font=font, fill='white', anchor='mt')
+                canvas = render_cinematic(image, announcement)
             canvas.save(destination, format='JPEG', quality=92, optimize=True)
             self.guard(principal, purpose)
             derived = self.media.save(destination, principal, consume=True)
             with self.sessions.begin() as db:
-                db.add(Idempotency(key=identity, subject=principal, request_hash=digest, response={'media_id': derived['id']}))
+                db.add(Idempotency(key=identity, subject=principal, request_hash=digest, response={'media_id': derived['id'], 'render_profile': profile}))
                 db.add(Audit(subject=principal, operation='prepare_instagram_artwork', outcome='success', details={
-                    'source_media_id': media_id, 'media_id': derived['id'], 'sha256': derived['sha256'], 'purpose': purpose, 'published': False}))
-            return self.result(derived, purpose, announcement, False)
+                    'source_media_id': media_id, 'media_id': derived['id'], 'sha256': derived['sha256'], 'purpose': purpose, 'render_profile': profile, 'published': False}))
+            return self.result(derived, purpose, announcement, False, profile)
 
-    def result(self, asset, purpose, announcement, reused):
+    def result(self, asset, purpose, announcement, reused, profile='v1'):
         self.media.path(asset['id'], asset['sha256'])
         self.media.reserve_delivery(asset['id'])
         url = self.media.temporary_url(asset['id'], asset['sha256'])
         result = {'media': asset, 'purpose': purpose, 'reused': reused, 'published': False,
-                  'status': 'artwork_prepared', 'preview_url': url, 'download_url': url + '&download=1',
+                  'status': 'artwork_prepared', 'render_profile': profile, 'preview_url': url, 'download_url': url + '&download=1',
                   'link_lifetime_seconds': 900}
         if purpose == 'story':
             result.update(transfer_url=url.replace('/media/', '/instagram/story/'),
