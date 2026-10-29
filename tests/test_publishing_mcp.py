@@ -46,7 +46,11 @@ async def test_mcp_prepare_approve_execute_and_legacy_preview(tmp_path,monkeypat
             assert 'uncertain' in executing['description'] and 'same requested workflow' in executing['description']
             assert status_tool['annotations']['readOnlyHint'] is True
             assert 'GETs only' in status_tool['description'] and 'Never publishes' in status_tool['description']
-            assert len(names)==19
+            assert len(names)==20
+            normalization=descriptions['normalize_media']
+            assert normalization['annotations']['readOnlyHint'] is False
+            assert normalization['annotations']['idempotentHint'] is True
+            assert normalization['_meta']['securitySchemes'][0]['scopes']==['socialhub:read','socialhub:publish']
             assert 'get_approval_requirements' in names
             assert not any('approve' in n or 'reconcile' in n for n in names)
             async def call(name,args):

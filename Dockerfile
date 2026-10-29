@@ -23,6 +23,7 @@ COPY scripts ./scripts
 FROM app-build AS test
 RUN uv sync --locked --extra test --no-editable
 COPY tests ./tests
+COPY normalizer ./normalizer
 USER socialhub
 CMD ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
 

@@ -1,0 +1,32 @@
+# Optional overlay. Adapt paths to the existing production bundle before use.
+# Seed media_normalization=false before enabling the deployment ceiling.
+services:
+  socialhub:
+    environment:
+      MEDIA_NORMALIZATION_ENABLED: 'true'
+    env_file:
+      - /path/to/private/secrets/normalization.env
+    networks:
+      normalization: {}
+  normalizer:
+    image: socialhub-normalizer:RELEASE
+    restart: unless-stopped
+    init: true
+    user: '10001:10001'
+    env_file:
+      - /path/to/private/secrets/normalization.env
+    volumes:
+      - /path/to/private/hdd/scratch:/work
+    read_only: true
+    tmpfs: ['/tmp:size=16m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 32
+    logging: {driver: none}
+    networks:
+      normalization: {}
+networks:
+  normalization:
+    internal: true

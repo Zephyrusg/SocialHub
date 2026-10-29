@@ -8,7 +8,9 @@ an unrelated Authelia admin group does not grant SocialHub access.
 
 ## Configured, available and effective
 
-- **Configured:** the persisted choice, or “Inherit deployment” when unset.
+- **Configured:** the persisted choice, or the feature's default when unset.
+  Existing capabilities inherit deployment settings; new media normalization
+  explicitly defaults off.
 - **Available:** the running deployment permits the implemented capability and
   its required dependencies. This is a hard ceiling.
 - **Effective:** the configured/inherited choice, deployment ceiling and parent
@@ -29,6 +31,7 @@ separate from `features`; saving one cannot overwrite the other.
 | Facebook Reels | Facebook ceiling, media switch and `reel` allowed | Pause native Reel mutations; hosted delivery is not required. |
 | Instagram Publishing | Global switches, Instagram allowlist entry, `INSTAGRAM_REELS_PUBLISHING_ENABLED` | Reels only. Other Instagram formats remain unavailable. |
 | Media Import | `MEDIA_INGESTION_ENABLED` | Pause ChatGPT imports and authenticated HTTP uploads where the proxy permits that route. |
+| Instagram Media Normalization | `MEDIA_NORMALIZATION_ENABLED`, dedicated worker secret and Media Import | Explicitly create a validated Instagram-compatible derivative. Off by default; requires the isolated worker. Never publishes. |
 | ChatGPT Direct Publishing | Deployed `chatgpt_direct` mode, OAuth owner/client restrictions, recorded tests and operator risk acceptance | Off requires independent owner authorization; it never creates a new direct policy. |
 | Signed Media Delivery | `MEDIA_DELIVERY_ENABLED` | Pause private/signed GET and HEAD downloads. Facebook images/videos additionally require a configured public delivery origin. |
 | Attachment Validation Probe | `MEDIA_ATTACHMENT_PROBE_ENABLED` and exact allowed hosts | Off leaves the hostname-only reference probe available, without downloading media. |

@@ -16,6 +16,7 @@ FEATURES = {
     'facebook_reels': ('Facebook Reels', 'Publish a validated MP4 using the native Reel workflow.', True),
     'instagram_publishing': ('Instagram Publishing', 'Instagram Reels only; other Instagram formats are not activated here.', True),
     'media_import': ('Media Import', 'Import ChatGPT attachments or authenticated uploads into expiring private storage.', False),
+    'media_normalization': ('Instagram Media Normalization', 'Create an optional Instagram-compatible MP4 copy; video is preserved and AAC audio may be re-encoded. Never publishes.', False),
     'chatgpt_direct': ('ChatGPT Direct Publishing', 'Use the deployed direct-instruction policy for its exact authorized owner and client. This is not independent proof of consent.', True),
     'media_delivery': ('Signed Media Delivery', 'Serve bounded, authenticated or signed downloads. Disabling can interrupt provider fetches already in progress.', False),
     'attachment_probe': ('Attachment Validation Probe', 'Download and validate an allowlisted ChatGPT attachment without storing it.', False),
@@ -23,7 +24,7 @@ FEATURES = {
 }
 DYNAMIC_FIELDS = {'publishing_enabled', 'facebook_media_publishing_enabled', 'facebook_media_allowed_types',
     'instagram_reels_publishing_enabled', 'media_ingestion_enabled', 'media_delivery_enabled',
-    'media_attachment_probe_enabled', 'approval_mode'}
+    'media_attachment_probe_enabled', 'media_normalization_enabled', 'approval_mode'}
 
 
 def deployment_settings(settings):
@@ -52,6 +53,8 @@ def states(base, values):
         and re.fullmatch(r'[a-f0-9]{64}', base.chatgpt_direct_evidence_sha256)
         and base.chatgpt_allowed_principals and base.chatgpt_allowed_client_ids)
     available = {'facebook_publishing': fb, 'instagram_publishing': ig,
+        'media_normalization': bool(base.media_normalization_enabled and base.media_ingestion_enabled
+                                    and len(base.media_normalization_secret.get_secret_value()) >= 64),
         'media_import': base.media_ingestion_enabled, 'chatgpt_direct': direct,
         'media_delivery': delivery, 'attachment_probe': bool(base.media_attachment_probe_enabled and base.media_download_hosts),
         'scheduling': False}
@@ -60,16 +63,21 @@ def states(base, values):
             fb and base.facebook_media_publishing_enabled and kind in base.facebook_media_allowed_types
             and (kind == 'reel' or (delivery and base.media_public_base_url)))
     result = {name: {'name':name, 'label':label, 'description':description, 'publishing':publishing,
-        'implemented':name != 'scheduling', 'configured':values.get(name), 'available':bool(available[name]),
+        'implemented':name != 'scheduling', 'configured':values.get(name), 'default_enabled':name != 'media_normalization', 'available':bool(available[name]),
         'effective':bool(available[name] and values.get(name, True)),
         'reason': '' if available[name] else ('Not implemented for live publishing.' if name == 'scheduling' else 'Blocked by deployment settings, account restrictions or required dependencies.')}
         for name, (label, description, publishing) in FEATURES.items()}
     for name in ['facebook_images', 'facebook_videos', 'facebook_reels']:
         result[name]['effective'] &= result['facebook_publishing']['effective']
         if name != 'facebook_reels': result[name]['effective'] &= result['media_delivery']['effective']
+    # New conversion is opt-in even before any persistent preference exists.
+    result['media_normalization']['effective'] = bool(available['media_normalization']
+        and values.get('media_normalization', False) and result['media_import']['effective'])
     for name, row in result.items():
         if row['available'] and not row['effective'] and values.get(name, True):
             row['reason'] = 'A required runtime feature is disabled.'
+    if available['media_normalization'] and not values.get('media_normalization', False):
+        result['media_normalization']['reason'] = 'Off until explicitly enabled by an administrator.'
     return result
 
 
@@ -80,6 +88,7 @@ def apply_flags(result, base, db):
     # No stored preference must preserve existing deployment behavior exactly.
     # Availability can be narrower than a raw switch (e.g. missing hosted URL).
     changes = {'media_ingestion_enabled': base.media_ingestion_enabled and values.get('media_import', True),
+        'media_normalization_enabled': enabled('media_normalization'),
         'media_delivery_enabled': base.media_delivery_enabled and values.get('media_delivery', True),
         'media_attachment_probe_enabled': base.media_attachment_probe_enabled and values.get('attachment_probe', True),
         'facebook_media_allowed_types': [kind for kind, name in [('image','images'),('video','videos'),('reel','reels')]

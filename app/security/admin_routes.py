@@ -124,11 +124,11 @@ def register_admin_routes(mcp, settings, sessions):
             body += '<h2>Feature Flags</h2><p>Configured preferences persist immediately. Deployment restrictions are hard limits; enabling a feature never approves a post. Disabling stops new execution, but cannot recall requests already sent to Meta. Read-only reconciliation remains available.</p>'
             body += '<table><thead><tr><th scope="col">Feature</th><th scope="col">Configured</th><th scope="col">Available</th><th scope="col">Effective</th><th scope="col">Control</th></tr></thead><tbody>'
             for feature in feature_status['features']:
-                configured = 'Inherit deployment' if feature['configured'] is None else ('On' if feature['configured'] else 'Off')
+                configured = ('Inherit deployment' if feature['default_enabled'] else 'Off by default') if feature['configured'] is None else ('On' if feature['configured'] else 'Off')
                 on = feature['effective']
                 # Allow an explicitly paused preference to be resumed even when
                 # another runtime dependency is off; effective state stays off.
-                requested = feature['configured'] if feature['configured'] is not None else True
+                requested = feature['configured'] if feature['configured'] is not None else feature['default_enabled']
                 desired = not requested
                 body += '<tr><th scope="row">' + escape(feature['label']) + '<p>' + escape(feature['description']) + '</p></th><td>' + configured + '</td><td>' + ('Yes' if feature['available'] else 'No') + '</td><td>' + ('On' if on else 'Off') + '<p>' + escape(feature['reason']) + '</p></td><td>'
                 if feature['available']:

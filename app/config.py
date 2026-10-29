@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     media_max_bytes: int = 100 * 1024 * 1024
     media_ingestion_enabled: bool = False
     media_attachment_probe_enabled: bool = False
+    media_normalization_enabled: bool = False
+    media_normalization_secret: SecretStr = SecretStr('')
     media_download_hosts: list[str] = []
     media_storage_max_bytes: int = 512 * 1024 * 1024
     media_storage_max_files: int = 16
@@ -87,6 +89,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def secure_defaults(self):
+        if self.media_normalization_enabled and len(self.media_normalization_secret.get_secret_value()) < 64:
+            raise ValueError('Media normalization requires its dedicated worker authentication secret')
         validate_url(self.public_url, https=False, path='/mcp')
         validate_url(self.browser_origin, path='')
         for cidr in self.trusted_proxy_cidrs:

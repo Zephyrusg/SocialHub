@@ -50,7 +50,7 @@ def create_server(settings=None):
                     # Active transfer locks and transient storage/DB failures are retried next interval.
                     pass
         retained = (Path(settings.media_root) / '.retention-enabled').exists()
-        task = asyncio.create_task(janitor()) if settings.media_ingestion_enabled or settings.media_attachment_probe_enabled or retained else None
+        task = asyncio.create_task(janitor()) if settings.media_ingestion_enabled or settings.media_attachment_probe_enabled or settings.media_normalization_enabled or retained else None
         try:
             yield {}
         finally:

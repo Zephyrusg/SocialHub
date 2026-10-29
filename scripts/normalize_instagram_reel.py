@@ -17,6 +17,7 @@ from app.config import Settings
 from app.core import HubError
 from app.connectors.reels import ReelWorkflows
 from app.services.media_manager import MediaManager
+from app.services.video_fingerprint import video_fingerprint
 
 
 IMAGE = 'mwader/static-ffmpeg:9.0.2-1@sha256:f5d100184884eb3e82b0eb14bb5ebf98da99826ac824989720297fb9ef21c822'
@@ -41,25 +42,6 @@ def command(source, destination):
 def digest(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
-
-
-def video_fingerprint(path):
-    """Hash compressed video packets, not decoded/re-encoded pictures."""
-    with tempfile.TemporaryFile() as data:
-        subprocess.run(['ffprobe', '-v', 'error', '-protocol_whitelist', 'file,pipe',
-                        '-select_streams', 'v:0', '-show_packets', '-show_data_hash', 'sha256',
-                        '-show_entries', 'packet=data_hash', '-of', 'json', str(path)],
-                       stdin=subprocess.DEVNULL, stdout=data, stderr=subprocess.DEVNULL,
-                       timeout=30, check=True)
-        data.seek(0)
-        raw = data.read(8 * 1024 * 1024 + 1)
-    if len(raw) > 8 * 1024 * 1024:
-        raise ValueError('Video packet report exceeds local verification limit')
-    packets = json.loads(raw)['packets']
-    hashes = [packet['data_hash'] for packet in packets]
-    if not hashes or any(not h.startswith('SHA256:') or len(h) != 71 for h in hashes):
-        raise ValueError('Missing compressed video hashes')
-    return {'packets': len(hashes), 'sha256': hashlib.sha256(''.join(hashes).encode()).hexdigest()}
 
 
 def validate_output(manager, before, path, expected_video):

@@ -43,7 +43,8 @@ It runs the pinned prebuilt FFmpeg image without network access, as the invoking
 non-root user, with a read-only container root, capabilities dropped, one CPU,
 384 MiB RAM, 64 processes, a 100 MiB output limit and a two-minute timeout. Only a
 read-only input snapshot and a dedicated output directory are mounted. Timed-out
-containers are removed. No FFmpeg stack is compiled or added to production.
+containers are removed. No FFmpeg source compilation or encoder installation in
+the main SocialHub runtime is required.
 
 Before accepting output, it runs the **existing Instagram Reel validator**, checks
 dimensions/frame rate/duration, and compares every compressed H.264 packet hash
@@ -68,33 +69,52 @@ Local scratch is removed automatically. Accepted output is retained for the user
 to retrieve; remove it and the local source when no longer needed. Once imported,
 normal SocialHub media ownership, expiry, quota and cleanup rules apply.
 
-## Proposed ChatGPT workflow (not implemented or deployed)
+## Integrated ChatGPT workflow
 
-Normalization should be optional and explicit rather than part of every import
-or `prepare_publication` call. Recommended design:
+`normalize_media(media_id, idempotency_key)` is an explicit MCP write tool that
+creates private media, not a social post. It requires the existing publisher
+identity, `socialhub:publish` scope, **Media Import** and **Instagram Media
+Normalization**. Normalization defaults off even when its deployment ceiling
+permits it. The administrator can enable it without restarting SocialHub.
 
-1. Import once, inspect the target-specific incompatibilities and offer to create
-   an Instagram-compatible derivative. Leave the original usable for Facebook.
-2. Require the owner-controlled **Media normalization** feature flag, initially
-   off, with deployment ceilings, authorization, revision checks and audit events.
-   A flag must not be shown as operational until the worker is implemented.
-3. Run a bounded job on a separate WSL/Gaming PC worker. Keep the Pi runtime
-   ffprobe-only. If that worker is offline, return a clear unavailable status.
-   A Pi-side optional worker is a later explicitly approved resource tradeoff.
-4. Give workers only a short-lived grant for one owned source and one result.
-   Enforce authenticated transfer, hashes, quotas, job expiry, concurrency limits,
-   cancellation and failure cleanup. Do not mount the entire private media store.
-5. Deduplicate by owner, source hash, normalization profile and profile version.
-   Create a new owned media object with source/provenance metadata and its own TTL.
-   Validate it independently on the server before allowing preparation.
-6. Show the derivative's audio change, timing, metadata and hash in the preview.
-   Preserve captions, AI disclosure, account restrictions and existing approval
-   policy. Do not publish or modify a prepared request automatically.
+1. Import the attachment with `import_media`.
+2. Ask for an Instagram-compatible copy using `normalize_media` with the owned
+   media ID and a stable new conversion idempotency key.
+3. Review the returned new media ID, metadata and normalization disclosure.
+   Already-compatible assets are reused without encoding; converted assets get
+   new bytes/hash and normal ownership, expiry, quotas and cleanup.
+4. Use the returned media ID in a **new** `prepare_publication` request. Keep the
+   requested caption and explicit AI-disclosure choice. Never edit an existing
+   immutable preview or reuse execution to fix an old Facebook publication.
+5. Review and explicitly request publication through the existing policy.
 
-This separates the lightweight production service from conversion tooling and
-removes repeated manual preprocessing once the optional worker is implemented.
-The current change provides the reproducible local correction and assessment;
-it does **not** claim automatic normalization from ChatGPT is available yet.
+The converter never calls Meta, creates a publication, changes a caption, grants
+publishing permission or relaxes format validation. Repeated calls with the same
+owner/key/source/profile reuse the stored derivative. Different input under the
+same key is rejected. Expired sources/results must be imported again; conversion
+does not silently extend their lifetime. Feature disabling blocks new jobs and
+prevents an in-flight result from being registered after conversion completes.
+
+An optional, separate `normalizer` container performs AAC encoding and MP4 remuxing.
+The main runtime remains ffprobe-only. The worker has no DB/Meta credentials, no
+mount of the private media store and no published host ports. Only SocialHub and
+the worker join its internal Docker network. Worker scratch uses its own private
+HDD directory. No public temporary URL or additional Nginx route is introduced.
+
+Each transfer has a short-lived HMAC grant bound to a random job, source hash,
+size and fixed profile. Persisted consumed-job markers prevent replay across
+worker restarts. Returned bytes, hash, length and response signature are verified;
+the main service independently validates Instagram metadata and compressed-video
+identity before accepting the derivative. No redirects, proxy-environment use,
+user-selected worker URL, file path, FFmpeg arguments or automatic HTTP retries
+are allowed. Errors expose no grants, media bytes or raw worker diagnostics.
+
+Jobs are serial, with 100 MiB input/output caps, bounded socket/encoding time,
+one encoding thread, a 256 MiB worker container and a 0.5 CPU ceiling. The existing
+cross-process media lock/quota protects the main service. Input/output scratch is
+deleted on success, failure and disconnect. Worker cleanup removes crash remnants
+and expired replay markers periodically; graceful conversion timeouts kill FFmpeg.
+Force-killing the container kills its child processes as well.
 
 ## Verification and deployment boundary
 
@@ -104,8 +124,45 @@ Regression coverage checks the actual failure properties, original immutability,
 no-clobber behavior, container restrictions and compressed-video preservation.
 The real source and exact results remain in ignored `private/` evidence.
 
-No production deployment, restart, migration or feature-flag change is required
-for this local helper. Production image size, idle RAM and ffprobe-only dependency
-set are unchanged. No live Instagram publication has been tested by this fix.
-Rollback is simply to stop using the helper and delete the local derivative;
-existing accounts, imported originals, previews and Facebook posts are unaffected.
+The local helper alone requires no deployment. The integrated MCP step requires
+both the updated SocialHub image and the optional worker; see the deployment and
+rollback procedure below. No live Instagram publication is implied by conversion
+testing. Accepted derivatives require their own reviewed publication instruction.
+
+## Deployment and rollback
+
+1. Build/test the main runtime normally and build the worker from
+   `normalizer/Dockerfile`, using the repository root as context. Prepare and
+   verify ARM64 artifacts before transferring them. No FFmpeg source compilation
+   or encoder installation in the main runtime is necessary.
+2. Back up the current Compose/runtime configuration, image/source revisions,
+   encrypted feature row and effective feature state. Check active sends and
+   preserve all existing account permissions, flags, media and credentials.
+3. Generate a dedicated random secret locally into a root-readable-only env file
+   (at least 64 characters). Give that file only to SocialHub and its worker; do
+   not give the worker the application's full env file. Never commit this secret.
+4. Provision a dedicated HDD scratch directory, owned by UID/GID 10001, mode 0700.
+   Adapt `deployment/production/compose.normalizer.example.yml` to the existing
+   bundle, retaining all existing application networks and env files. It is an
+   overlay example, not a replacement for the homelab's production configuration.
+5. Initialize `media_normalization=false` in the encrypted feature preferences
+   before raising the new deployment ceiling. Older images reject unknown feature
+   keys: do this while the old app is stopped, or after installing the new code
+   with its ceiling still off. Preserve all other values and log the initialization.
+6. Validate Compose, then start only the new worker and recreate only SocialHub.
+   No Nginx, Authelia, database or unrelated-container restart is required. Verify
+   health, private networking, no published ports, runtime dependencies and
+   unchanged effective publishing preferences. The new toggle must be available
+   but off. The owner can then enable it and refresh ChatGPT's tool list.
+7. Perform a conversion-only smoke test with explicit owner activation; verify
+   reuse, quota, temporary-file cleanup and a new preview. Do not publish content.
+
+For rollback, stop SocialHub and the worker, restore the saved main image and
+Compose/runtime configuration, and remove **only** the new `media_normalization`
+preference before starting an older image. Preserve any newer changes to other
+preferences; audit that compatibility adjustment. If no concurrent changes were
+made, the protected encrypted feature-row backup can instead be restored exactly.
+Do not roll back the database or erase existing originals/publications. Remove
+the worker network/scratch only when unused. The new secret can be removed after
+both containers no longer reference it. Record actual paths, timestamps and
+validation results in ignored private homelab change tracking, not public Git.
