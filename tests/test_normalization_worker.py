@@ -20,6 +20,9 @@ OUTPUT = Path('tests/fixtures/reel-h264-aac-5s.mp4').read_bytes()
 @pytest.fixture
 def worker(tmp_path, monkeypatch):
     monkeypatch.setattr(server, 'ROOT', tmp_path)
+    # Exercise the same reservation logic with a tiny test-only job ceiling;
+    # fixtures are 11 KiB and do not need the production 100 MiB allowance.
+    monkeypatch.setattr(server, 'MAX_BYTES', 1024 * 1024)
     def encode(args, **kwargs):
         assert args[args.index('-c:v') + 1] == 'copy'
         assert kwargs['timeout'] == 90
@@ -84,6 +87,14 @@ def test_stale_cleanup_only_touches_worker_owned_names(tmp_path):
     os.utime(source,(old,old));os.utime(marker,(old,old));os.utime(unrelated,(old,old))
     server.cleanup(tmp_path)
     assert not source.exists() and not marker.exists() and unrelated.read_bytes()==b'keep'
+
+
+def test_insufficient_worker_disk_space_rejects_before_conversion(worker,monkeypatch):
+    from types import SimpleNamespace
+    port,root=worker
+    monkeypatch.setattr(server.shutil,'disk_usage',lambda p:SimpleNamespace(free=0))
+    assert request(port)[0]==507
+    assert not list(root.glob('.job-*'))
 
 
 def test_profile_never_decodes_or_encodes_video():
