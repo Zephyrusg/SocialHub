@@ -252,3 +252,24 @@ async def test_artwork_dependencies_block_preparation(media_settings, sessions, 
     source = art.media.save(Path('tests/fixtures/portrait.jpg'), 'alice')
     flags.save('owner', flags.status('owner')['revision'], dependency, False)
     with pytest.raises(HubError):await art.prepare('alice', source['id'], 'blocked')
+
+
+async def test_instagram_capability_discovery_tracks_photo_and_story_toggles(publisher, tmp_path):
+    from app.services.hub import Hub
+    from app.services.administration import EffectiveSettings
+    service, flags, _, _, _, _, _ = await photo(publisher, tmp_path)
+    s = service.settings
+    s.media_ingestion_enabled = s.instagram_story_artwork_enabled = True
+    hub = Hub(service.sessions, EffectiveSettings(s, service.sessions))
+    async def caps():return (await hub.read('get_account_capabilities', 'pixelpapa-instagram'))['capabilities']
+    enabled = await caps()
+    assert enabled['publish_image_enabled'] and not enabled['prepare_story_artwork_enabled']
+    assert enabled['story_publication_mode'] == 'manual_in_instagram'
+    assert not enabled['publish_story_enabled'] and not enabled['native_story_music_api_supported']
+    assert not enabled['music_library_lookup_supported']
+    flags.save('owner', flags.status('owner')['revision'], 'instagram_photos', False)
+    assert not (await caps())['publish_image_enabled']
+    flags.save('owner', flags.status('owner')['revision'], 'instagram_story_artwork', True)
+    assert (await caps())['prepare_story_artwork_enabled']
+    flags.save('owner', flags.status('owner')['revision'], 'media_import', False)
+    assert not (await caps())['prepare_story_artwork_enabled']

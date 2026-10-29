@@ -123,6 +123,15 @@ class Hub:
                         and caps.get('publish_post') and caps['live_writes_enabled'] and self.settings.facebook_media_publishing_enabled
                         and self.settings.media_delivery_enabled and self.settings.media_public_base_url
                         and kind in self.settings.facebook_media_allowed_types)
+                if account.platform == 'instagram':
+                    caps['publish_image_enabled'] = bool(caps.get('publish_post') and caps['live_writes_enabled']
+                        and self.settings.instagram_photos_enabled and self.settings.media_delivery_enabled
+                        and self.settings.media_public_base_url)
+                    caps['prepare_story_artwork_enabled'] = bool(self.settings.instagram_story_artwork_enabled)
+                    caps['publish_story_enabled'] = False
+                    caps['native_story_music_api_supported'] = False
+                    caps['music_library_lookup_supported'] = False
+                    caps['story_publication_mode'] = 'manual_in_instagram'
                 caps['publish_reel_enabled'] = bool(caps.get('publish_post') and caps['live_writes_enabled']
                     and ((account.platform == 'facebook' and self.settings.facebook_media_publishing_enabled
                           and 'reel' in self.settings.facebook_media_allowed_types)

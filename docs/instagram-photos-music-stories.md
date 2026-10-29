@@ -141,12 +141,12 @@ check as rollout acceptance, with separate publication approval.
 
 ## Development validation
 
-Full regression suite: **653 passed, 2 skipped**. The skipped tests require an
+Full regression suite: **654 passed, 2 skipped**. The skipped tests require an
 explicitly configured disposable local MariaDB; shared registry/CAS SQLite tests
 passed. Three existing Alembic deprecation warnings remain. New checks cover
 Creator feed approval, durable checkpoints, ambiguous outcomes without resend,
 container errors/expiry, verified photo reconciliation, disabling before dispatch,
-parent dependencies, explicit-off rollout initialization, derivative ownership and
+parent dependencies and capability discovery, explicit-off rollout initialization, derivative ownership and
 idempotency, transfer signatures/downloads, MCP discovery and manual-only Story
 status. `git diff --check` and Python compilation also passed. Mocked checks do
 not establish live Meta acceptance, phone share targets or Music Library presence.
