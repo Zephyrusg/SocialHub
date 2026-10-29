@@ -6,7 +6,7 @@ import unicodedata
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 from app.core import HubError
 
-STORY_PROFILE = 'cinematic-release-v2'
+STORY_PROFILE = 'cinematic-release-v2.1'
 SIZE = (1080, 1920)
 COVER_WIDTH = 840
 # Coordinates describe reserved regions, not baked-in stickers or visible labels.
@@ -50,7 +50,7 @@ def cover_accent(image):
     return accent
 
 
-def _safe_announcement(text, face):
+def _safe_text(text, face):
     text = ' '.join(unicodedata.normalize('NFC', text).split())
     missing = face.getmask('\uffff')
     marker = (missing.size, bytes(missing))
@@ -64,10 +64,16 @@ def _safe_announcement(text, face):
     return text
 
 
-def announcement_lines(text):
-    """Wrap by measured pixels, including long words, with a fixed safe text region."""
-    face = font('DejaVuSans.ttf', 32)
-    text = _safe_announcement(text, face)
+def validate_subtitle(subtitle_mode, song_title):
+    if not isinstance(subtitle_mode, str) or subtitle_mode not in {'title', 'hidden'} or (song_title is not None and not isinstance(song_title, str)):
+        raise HubError('invalid_request', 'Choose subtitle_mode title or hidden and an optional song title')
+    title = (song_title or '').strip()
+    if len(title) > 200 or (subtitle_mode == 'title' and not title):
+        raise HubError('invalid_request', 'Title subtitles require a non-empty song title of up to 200 characters')
+    return title
+
+
+def _wrap_text(text, face):
     lines, line = [], ''
     for word in text.split():
         proposed = (line+' '+word).strip()
@@ -83,9 +89,24 @@ def announcement_lines(text):
                 line = ''
             line += char
     if line:lines.append(line)
-    if len(lines) > 3:
-        raise HubError('invalid_story_text', 'Shorten the announcement to fit three readable lines above the cover')
     return lines
+
+
+def subtitle_layout(song_title):
+    """Wrap and reduce type size within a bounded band; never clip or cover artwork."""
+    title = validate_subtitle('title', song_title)
+    for size in (40, 36, 32):
+        face = font('DejaVuSans.ttf', size)
+        text = _safe_text(title, face)
+        lines = _wrap_text(text, face)
+        if len(lines) > 3:
+            continue
+        heights = [face.getbbox(line)[3]-face.getbbox(line)[1] for line in lines]
+        bottom = max(345+i*(size+4)+height for i,height in enumerate(heights))
+        cover_top = max(430, bottom+24)
+        if cover_top <= 480:
+            return lines, face, cover_top
+    raise HubError('invalid_story_text', 'Shorten the song title to fit three readable lines above the cover')
 
 
 def _text(canvas, text, top, face, fill, tracking=0):
@@ -102,9 +123,11 @@ def _text(canvas, text, top, face, fill, tracking=0):
         x += face.getlength(char)+tracking
 
 
-def render_cinematic(image, announcement=''):
+def render_cinematic(image, announcement='', *, subtitle_mode='hidden', song_title=None):
     """Render a single RGB frame; blur/lighting masks use a 360x640 working canvas."""
-    lines = announcement_lines(announcement)
+    title = validate_subtitle(subtitle_mode, song_title)
+    lines, subtitle_font, cover_top = subtitle_layout(title) if subtitle_mode == 'title' else ([], None, 410)
+    # announcement remains accepted for compatibility, but is never rendered.
     accent = cover_accent(image)
     # Crop ONLY the enlarged background. The sharp foreground uses contain below.
     small = ImageOps.fit(image, (360,640), Image.Resampling.LANCZOS)
@@ -115,7 +138,6 @@ def render_cinematic(image, announcement=''):
     gradient.putdata([round(255*(.08+.40*max(0,(y-340)/300))) for y in range(640)])
     small = Image.composite(Image.new('RGB', small.size, (7,18,38)), small, gradient.resize(small.size))
     cover = ImageOps.contain(image, (COVER_WIDTH,COVER_WIDTH), Image.Resampling.LANCZOS)
-    cover_top = 415+15*len(lines) if lines else 410
     x, y = (1080-cover.width)//2, cover_top+(840-cover.height)//2
     bounds = (x/3,y/3,(x+cover.width)/3,(y+cover.height)/3)
     glow = Image.new('L', small.size)
@@ -128,10 +150,10 @@ def render_cinematic(image, announcement=''):
     small = Image.composite(Image.new('RGB', small.size, (0,5,13)), small, shadow)
     canvas = small.resize(SIZE, Image.Resampling.LANCZOS)
     canvas.paste(cover, (x,y))
-    _text(canvas, 'OUT NOW', 240 if lines else 260, font('DejaVuSerif-Bold.ttf',92 if lines else 100), accent, tracking=3)
+    _text(canvas, 'OUT NOW', 240 if lines else 260, font('DejaVuSerif-Bold.ttf',100), accent, tracking=3)
     if lines:
         for index, line in enumerate(lines):
-            _text(canvas, line, 345+index*34, font('DejaVuSans.ttf',32), (248,243,232))
+            _text(canvas, line, 345+index*(subtitle_font.size+4), subtitle_font, (248,243,232))
     else:
         draw = ImageDraw.Draw(canvas)
         draw.line((405,370,516,370), fill=accent, width=2)

@@ -48,13 +48,15 @@ def register_instagram_tools(mcp, settings, sessions):
         idempotency_key: Annotated[str, Field(min_length=1, max_length=128)],
         purpose: Literal['feed', 'story'] = 'story',
         announcement: Annotated[str, Field(max_length=140)] = '',
+        subtitle_mode: Literal['title', 'hidden'] = 'hidden',
+        song_title: Annotated[str, Field(max_length=200)] | None = None,
     ) -> dict[str, Any]:
-        """Create a JPEG copy from an owned imported cover. Feed: normalize aspect/size without cropping, then use the returned media ID in prepare_publication with content_type image and pixelpapa-instagram; review and obtain explicit publication approval. Story: prepare a cinematic 1080x1920 poster with OUT NOW and PIXELPAPA branding, plus a private phone transfer page. Leave announcement empty for the standard design; use it only for extra text. Choose PixelPapa — It's Dangerous to Go Alone from the native Music sticker and select its excerpt inside Instagram; publish manually there. Track availability is unverified; there is no supported automatic library lookup. Transfer/share never means published. No embedded audio, video rendering or native-app intent bridge. Reusing the same key refreshes expiring links to the same asset; changed inputs need a new key. Requires the relevant Settings toggle."""
+        """Create a JPEG copy from an owned imported cover. Feed: normalize aspect/size without cropping, then use the returned media ID in prepare_publication with content_type image and pixelpapa-instagram; review and obtain explicit publication approval. Story: prepare a cinematic 1080x1920 poster with OUT NOW and PIXELPAPA branding, plus a private phone transfer page. Subtitle defaults hidden. Use subtitle_mode title with a non-empty song_title to display it under OUT NOW. announcement is accepted for compatibility but is not rendered. No OCR is performed. Choose PixelPapa — It's Dangerous to Go Alone from the native Music sticker and select its excerpt inside Instagram; publish manually there. Track availability is unverified; there is no supported automatic library lookup. Transfer/share never means published. No embedded audio, video rendering or native-app intent bridge. Reusing the same key refreshes expiring links to the same asset; changed inputs need a new key. Requires the relevant Settings toggle."""
         token = get_access_token()
         try:
             if token is None:raise HubError('unauthenticated', 'Authenticated MCP context required')
             if 'socialhub:publish' not in token.scopes:raise HubError('insufficient_scope', 'Artwork preparation requires publish scope')
-            return {'ok': True, 'data': await artwork.prepare(token.client_id, media_id, idempotency_key, purpose, announcement)}
+            return {'ok': True, 'data': await artwork.prepare(token.client_id, media_id, idempotency_key, purpose, announcement, subtitle_mode=subtitle_mode, song_title=song_title)}
         except HubError as error:
             return {'ok': False, 'error': {'code': error.code, 'message': error.message, 'retryable': error.retryable}}
         except Exception:

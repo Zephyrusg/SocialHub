@@ -51,6 +51,10 @@ async def test_mcp_prepare_approve_execute_and_legacy_preview(tmp_path,monkeypat
             assert artwork['annotations']['readOnlyHint'] is False
             assert 'publish manually there' in artwork['description']
             assert artwork['inputSchema']['properties']['purpose']['enum']==['feed','story']
+            subtitle = artwork['inputSchema']['properties']['subtitle_mode']
+            assert subtitle['enum']==['title','hidden'] and subtitle['default']=='hidden'
+            assert 'song_title' in artwork['inputSchema']['properties']
+            assert 'announcement' in artwork['inputSchema']['properties']
             normalization=descriptions['normalize_media']
             assert normalization['annotations']['readOnlyHint'] is False
             assert normalization['annotations']['idempotentHint'] is True
@@ -59,6 +63,10 @@ async def test_mcp_prepare_approve_execute_and_legacy_preview(tmp_path,monkeypat
             assert not any('approve' in n or 'reconcile' in n for n in names)
             async def call(name,args):
                 return (await rpc('tools/call',{'name':name,'arguments':args}))['structuredContent']
+            invalid_subtitle=await call('prepare_instagram_artwork',{'media_id':'00000000-0000-0000-0000-000000000000','idempotency_key':'subtitle-empty','subtitle_mode':'title'})
+            assert not invalid_subtitle['ok'] and invalid_subtitle['error']['code']=='invalid_request'
+            disabled_subtitle=await call('prepare_instagram_artwork',{'media_id':'00000000-0000-0000-0000-000000000000','idempotency_key':'subtitle-disabled','subtitle_mode':'title','song_title':"It's Dangerous to Go Alone"})
+            assert not disabled_subtitle['ok'] and disabled_subtitle['error']['code']=='instagram_artwork_disabled'
             response=await call('publish_post',{'account_id':'pixelpapa-facebook','text':'Review only','idempotency_key':'legacy'})
             assert response['ok'] and response['data']['state']=='prepared' and not calls
             assert response['data']['approval']['preferred_interface']=='chatgpt'

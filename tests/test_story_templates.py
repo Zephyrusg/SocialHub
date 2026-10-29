@@ -6,7 +6,7 @@ import pytest
 from PIL import Image, ImageDraw, ImageOps, ImageStat
 from app.core import HubError
 from app.database.models import Idempotency
-from app.services.story_templates import render_cinematic, cover_accent, announcement_lines, font, _luminance, STORY_PROFILE
+from app.services.story_templates import render_cinematic, cover_accent, subtitle_layout, font, _luminance, STORY_PROFILE
 from app.services.instagram_artwork import InstagramArtwork
 from test_attachment_ingestion import media_settings
 from test_instagram_photos_stories import enable
@@ -46,16 +46,16 @@ def test_colors_follow_cover_instead_of_fixed_gold():
     assert warm!=cool and warm[0]>warm[2] and cool[1]>cool[0]
 
 
-@pytest.mark.parametrize('announcement', ['', 'OUT NOW • PIXELPAPA', 'New music, new adventures — available everywhere. Join us for a new chapter and celebrate the release together.'])
-def test_all_text_ink_fits_safe_regions_and_never_overlaps_cover(monkeypatch,announcement):
+@pytest.mark.parametrize('title', ['', "It's Dangerous to Go Alone", 'New music, new adventures — available everywhere. Join us for a new chapter and celebrate the release together.'])
+def test_all_text_ink_fits_safe_regions_and_never_overlaps_cover(monkeypatch,title):
     source=cover();bounds=[]
     original=ImageDraw.ImageDraw.text
     def record(self,xy,text,*args,**kwargs):
         if text.strip():bounds.append(self.textbbox(xy,text,font=kwargs['font']))
         return original(self,xy,text,*args,**kwargs)
     monkeypatch.setattr(ImageDraw.ImageDraw,'text',record)
-    rendered=render_cinematic(source,announcement)
-    count=len(announcement_lines(announcement));top=415+15*count if count else 410
+    rendered=render_cinematic(source, subtitle_mode='title' if title else 'hidden', song_title=title)
+    top=subtitle_layout(title)[2] if title else 410
     for left,upper,right,lower in bounds:
         assert 95<=left<right<=985
         assert 230<=upper<lower<1460
@@ -65,22 +65,22 @@ def test_all_text_ink_fits_safe_regions_and_never_overlaps_cover(monkeypatch,ann
 
 def test_known_punctuation_and_accents_have_real_glyphs():
     face=font('DejaVuSans.ttf',32)
-    assert announcement_lines('OUT NOW • PIXELPAPA — Café “été”…')
+    assert subtitle_layout('OUT NOW • PIXELPAPA — Café “été”…')
     missing=face.getmask('\uffff')
     for char in '•—é“”…':
         glyph=face.getmask(char)
         assert (glyph.size,bytes(glyph))!=(missing.size,bytes(missing))
     with pytest.raises(HubError,match='supported|plain text'):
-        announcement_lines('Unsupported \U00020000')
-    with pytest.raises(HubError):announcement_lines('hidden\u200bcontrol')
+        subtitle_layout('Unsupported \U00020000')
+    with pytest.raises(HubError):subtitle_layout('hidden\u200bcontrol')
 
 
 def test_overflow_is_refused_without_clipping():
     with pytest.raises(HubError,match='Shorten'):
-        announcement_lines('W'*140)
+        subtitle_layout('W'*140)
 
 
-async def test_legacy_idempotency_returns_old_asset_but_new_keys_use_new_profile(media_settings,sessions):
+async def test_legacy_story_key_requires_fresh_key_and_preserves_old_asset(media_settings,sessions):
     s=media_settings;s.instagram_story_artwork_enabled=True;s.media_public_base_url='https://media.example.test'
     enable(s,sessions,'instagram_story_artwork');service=InstagramArtwork(s,sessions)
     source=service.media.save(Path('tests/fixtures/portrait.png'),'alice')
@@ -89,8 +89,10 @@ async def test_legacy_idempotency_returns_old_asset_but_new_keys_use_new_profile
     digest=hashlib.sha256(json.dumps([source['id'],source['sha256'],'story','old announcement','v1']).encode()).hexdigest()
     with sessions.begin() as db:
         db.add(Idempotency(key=identity,subject='alice',request_hash=digest,response={'media_id':legacy['id']}))
-    previous=await service.prepare('alice',source['id'],'old-story','story','old announcement')
-    assert previous['reused'] and previous['media']['id']==legacy['id'] and previous['render_profile']=='v1'
+    with pytest.raises(HubError) as conflict:
+        await service.prepare('alice',source['id'],'old-story','story','old announcement')
+    assert conflict.value.code=='idempotency_conflict'
+    assert service.media.get(legacy['id'],'alice')==legacy
     current=await service.prepare('alice',source['id'],'fresh-story','story','old announcement')
     assert not current['reused'] and current['render_profile']==STORY_PROFILE
     assert current['media']['id']!=legacy['id'] and not current['published']
