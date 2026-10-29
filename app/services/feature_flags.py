@@ -15,6 +15,11 @@ FEATURES = {
     'facebook_videos': ('Facebook Videos', 'Publish a regular Facebook video; requires signed media delivery.', True),
     'facebook_reels': ('Facebook Reels', 'Publish a validated MP4 using the native Reel workflow.', True),
     'instagram_publishing': ('Instagram Publishing', 'Instagram Reels only; other Instagram formats are not activated here.', True),
+    'youtube_publishing': ('YouTube Publishing', 'Upload only to the verified allowlisted channel, under the reviewed visibility.', True),
+    'youtube_shorts': ('YouTube Shorts', 'Upload square/vertical MP4 up to three minutes; YouTube determines classification.', True),
+    'youtube_videos': ('YouTube Standard Videos', 'Upload validated videos with structured metadata and resumable progress.', True),
+    'youtube_thumbnails': ('YouTube Custom Thumbnails', 'Custom thumbnail upload is not implemented in this release.', True),
+    'youtube_scheduling': ('YouTube Scheduling', 'Native publishAt scheduling is not implemented in this release.', True),
     'media_import': ('Media Import', 'Import ChatGPT attachments or authenticated uploads into expiring private storage.', False),
     'media_normalization': ('Instagram Media Normalization', 'Create an optional Instagram-compatible MP4 copy; video is preserved and AAC audio may be re-encoded. Never publishes.', False),
     'chatgpt_direct': ('ChatGPT Direct Publishing', 'Use the deployed direct-instruction policy for its exact authorized owner and client. This is not independent proof of consent.', True),
@@ -24,7 +29,8 @@ FEATURES = {
 }
 DYNAMIC_FIELDS = {'publishing_enabled', 'facebook_media_publishing_enabled', 'facebook_media_allowed_types',
     'instagram_reels_publishing_enabled', 'media_ingestion_enabled', 'media_delivery_enabled',
-    'media_attachment_probe_enabled', 'media_normalization_enabled', 'approval_mode'}
+    'media_attachment_probe_enabled', 'media_normalization_enabled', 'approval_mode',
+    'youtube_publishing_enabled','youtube_shorts_enabled','youtube_videos_enabled'}
 
 
 def deployment_settings(settings):
@@ -36,12 +42,15 @@ def load_flags(base, db):
     row = db.get(SiteConfiguration, 'features')
     try:
         values = json.loads(TokenVault([base.encryption_key.get_secret_value()]).cipher.decrypt(row.ciphertext.encode())) if row else {}
-        if not isinstance(values, dict) or set(values) - (set(FEATURES) - {'scheduling'}) or any(type(v) is not bool for v in values.values()):
+        if not isinstance(values, dict) or set(values) - (set(FEATURES) - UNSUPPORTED) or any(type(v) is not bool for v in values.values()):
             raise ValueError()
     except (InvalidToken, ValueError, TypeError, AttributeError):
         raise HubError('configuration_invalid', 'Stored feature configuration could not be verified') from None
     return (row.revision if row else 0), values
 
+
+UNSUPPORTED = {'scheduling', 'youtube_thumbnails', 'youtube_scheduling'}
+OFF_DEFAULT = {'media_normalization','youtube_publishing','youtube_shorts','youtube_videos','youtube_thumbnails','youtube_scheduling'}
 
 def states(base, values):
     live = base.meta_live_writes and base.publishing_enabled
@@ -62,19 +71,24 @@ def states(base, values):
         available['facebook_' + {'image':'images', 'video':'videos', 'reel':'reels'}[kind]] = bool(
             fb and base.facebook_media_publishing_enabled and kind in base.facebook_media_allowed_types
             and (kind == 'reel' or (delivery and base.media_public_base_url)))
+    yt = bool(base.youtube_enabled and base.youtube_publishing_enabled and base.youtube_channel_ids and 'pixelpapa-youtube' in base.youtube_write_account_ids and base.publishing_enabled)
+    available.update(youtube_publishing=yt, youtube_shorts=yt and base.youtube_shorts_enabled,
+        youtube_videos=yt and base.youtube_videos_enabled, youtube_thumbnails=False, youtube_scheduling=False)
     result = {name: {'name':name, 'label':label, 'description':description, 'publishing':publishing,
-        'implemented':name != 'scheduling', 'configured':values.get(name), 'default_enabled':name != 'media_normalization', 'available':bool(available[name]),
-        'effective':bool(available[name] and values.get(name, True)),
-        'reason': '' if available[name] else ('Not implemented for live publishing.' if name == 'scheduling' else 'Blocked by deployment settings, account restrictions or required dependencies.')}
+        'implemented':name not in UNSUPPORTED, 'configured':values.get(name), 'default_enabled':name not in OFF_DEFAULT, 'available':bool(available[name]),
+        'effective':bool(available[name] and values.get(name, name not in OFF_DEFAULT)),
+        'reason': '' if available[name] else ('Not implemented for live publishing.' if name in UNSUPPORTED else 'Blocked by deployment settings, account restrictions or required dependencies.')}
         for name, (label, description, publishing) in FEATURES.items()}
     for name in ['facebook_images', 'facebook_videos', 'facebook_reels']:
         result[name]['effective'] &= result['facebook_publishing']['effective']
         if name != 'facebook_reels': result[name]['effective'] &= result['media_delivery']['effective']
+    for name in ['youtube_shorts','youtube_videos']:
+        result[name]['effective'] &= result['youtube_publishing']['effective']
     # New conversion is opt-in even before any persistent preference exists.
     result['media_normalization']['effective'] = bool(available['media_normalization']
         and values.get('media_normalization', False) and result['media_import']['effective'])
     for name, row in result.items():
-        if row['available'] and not row['effective'] and values.get(name, True):
+        if row['available'] and not row['effective'] and values.get(name, name not in OFF_DEFAULT):
             row['reason'] = 'A required runtime feature is disabled.'
     if available['media_normalization'] and not values.get('media_normalization', False):
         result['media_normalization']['reason'] = 'Off until explicitly enabled by an administrator.'
@@ -95,8 +109,10 @@ def apply_flags(result, base, db):
             if kind in base.facebook_media_allowed_types and values.get('facebook_'+name, True)],
         'facebook_media_publishing_enabled': base.facebook_media_publishing_enabled and values.get('facebook_publishing', True),
         'instagram_reels_publishing_enabled': base.instagram_reels_publishing_enabled and values.get('instagram_publishing', True)}
+    for key in ['youtube_publishing_enabled','youtube_shorts_enabled','youtube_videos_enabled']:
+        changes[key] = enabled(key.removesuffix('_enabled'))
     if any(n in values for n in ['facebook_publishing','instagram_publishing']):
-        changes['publishing_enabled'] = base.publishing_enabled and (enabled('facebook_publishing') or enabled('instagram_publishing'))
+        changes['publishing_enabled'] = base.publishing_enabled and (enabled('facebook_publishing') or enabled('instagram_publishing') or enabled('youtube_publishing'))
     if base.approval_mode == 'chatgpt_direct' and not values.get('chatgpt_direct', True):
         changes['approval_mode'] = 'owner_required'
     for key, value in changes.items():setattr(result, key, value)
@@ -121,7 +137,7 @@ class FeatureFlags:
 
     def save(self, subject, revision, name, enabled, *, acknowledged=False):
         self.authorize(subject)
-        if type(revision) is not int or revision < 0 or name not in FEATURES or name == 'scheduling' or type(enabled) is not bool:
+        if type(revision) is not int or revision < 0 or name not in FEATURES or name in UNSUPPORTED or type(enabled) is not bool:
             raise HubError('invalid_feature', 'Unsupported feature or malformed preference')
         if enabled and FEATURES[name][2] and acknowledged is not True:
             raise HubError('feature_confirmation_required', 'Review the publishing warning before enabling this feature')

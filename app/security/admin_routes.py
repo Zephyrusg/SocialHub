@@ -15,7 +15,7 @@ from app.admin_ui import ASSETS, SECTIONS, layout, render, notice
 COOKIE = '__Secure-socialhub-admin'
 FLOW_COOKIE = '__Secure-socialhub-admin-oidc'
 HEADERS = {'Cache-Control': 'no-store', 'Pragma': 'no-cache', 'Referrer-Policy': 'strict-origin',
-    'Content-Security-Policy': "default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+    'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
     'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY'}
 
 

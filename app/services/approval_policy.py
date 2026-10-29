@@ -25,7 +25,7 @@ class ApprovalPolicy:
             and context.oauth_client_id in s.chatgpt_allowed_client_ids
             and principal in s.chatgpt_allowed_principals and principal in s.publishing_allowed_subjects
             and payload['request']['operation'] in s.chatgpt_allowed_operations
-            and all(aid in s.meta_write_account_ids for aid in payload['request']['account_ids'])
+            and all(aid in s.meta_write_account_ids + s.youtube_write_account_ids for aid in payload['request']['account_ids'])
             and len(payload['request']['account_ids']) == 1)
 
     def fingerprint(self):
@@ -35,6 +35,7 @@ class ApprovalPolicy:
                   sorted(s.chatgpt_allowed_operations), sorted(s.meta_write_account_ids), s.chatgpt_confirmation_tested,
                   s.chatgpt_confirmation_evidence_sha256, s.chatgpt_direct_tested,
                   s.chatgpt_direct_evidence_sha256, s.chatgpt_residual_risk_accepted]
+        if s.youtube_write_account_ids:values.append(sorted(s.youtube_write_account_ids))
         return hashlib.sha256(json.dumps(values, separators=(',', ':')).encode()).hexdigest()
 
     def requirements(self, principal, payload, context=None):

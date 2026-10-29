@@ -21,7 +21,7 @@ from app.security.tokens import TokenVault
 from app.services.hub import Hub
 from app.services.administration import EffectiveSettings
 from app.services.publishing import PublishingService
-from app.models_publication import PublicationRequest
+from app.models_publication import PublicationRequest, YouTubeMetadata
 from sqlalchemy import select
 from app.database.models import Account, Media
 
@@ -221,14 +221,14 @@ def create_server(settings=None):
     @mcp.tool(annotations=write, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish']}]})
     async def prepare_publication(account_ids: Annotated[list[Short], Field(min_length=1, max_length=8)], idempotency_key: Short,
                                   text: Annotated[str, Field(max_length=63206)] = '',
-                                  content_type: Literal['text', 'image', 'link', 'video', 'reel'] = 'text',
+                                  content_type: Literal['text', 'image', 'link', 'video', 'reel', 'short'] = 'text',
                                   media_ids: Annotated[list[Short], Field(max_length=1)] = [], link_url: Annotated[str, Field(max_length=2048)] | None = None,
                                   operation: Literal['publish', 'update', 'reply'] = 'publish', post_id: Short | None = None, comment_id: Short | None = None,
-                                  is_ai_generated: StrictBool | None = None) -> dict[str, Any]:
-        """Prepare the exact requested content/accounts for review in ChatGPT. Does not publish or grant approval. For Reels, is_ai_generated defaults to the server preference (on by default); show its resolved value in the preview and use false only for non-AI footage. This disclosure is not publication consent. Immutable text, disclosure and media hashes bind execution; follow the returned approval path and respect native host confirmation."""
+                                  is_ai_generated: StrictBool | None = None, youtube: YouTubeMetadata | None = None) -> dict[str, Any]:
+        """Prepare the exact requested content/accounts for review in ChatGPT. Does not publish or grant approval. For YouTube, use content_type video or short and the youtube object (title, description, tags, visibility default private, explicit made_for_kids and contains_synthetic_media). Never put its metadata in text. For Reels, is_ai_generated defaults to the server preference (on by default); show its resolved value in the preview and use false only for non-AI footage. This disclosure is not publication consent. Immutable text, disclosure and media hashes bind execution; follow the returned approval path and respect native host confirmation."""
         return await publication_call('prepare', idempotency_key=idempotency_key, request={'account_ids': account_ids, 'text': text,
             'content_type': content_type, 'media_ids': media_ids, 'link_url': link_url, 'operation': operation, 'post_id': post_id, 'comment_id': comment_id,
-            'is_ai_generated': is_ai_generated})
+            'is_ai_generated': is_ai_generated, 'youtube':youtube.model_dump() if youtube else None})
 
     @mcp.tool(annotations=read, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read']}]})
     async def get_publication_preview(publication_id: Short) -> dict[str, Any]:
@@ -238,12 +238,12 @@ def create_server(settings=None):
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True), structured_output=True,
               meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read', 'socialhub:publish']}]})
     async def execute_publication(publication_id: Short) -> dict[str, Any]:
-        """Execute only an explicitly requested and reviewed immutable publication. Respect native ChatGPT write confirmation. For Reels, each call advances at most one mutation per target; continue this same requested workflow after read-only status checks report a ready checkpoint. Observe retry_at. Never recreate or blindly retry uncertain targets. The configured policy enforces owner approval or authenticated client-policy reliance."""
+        """Execute only an explicitly requested and reviewed immutable publication. Respect native ChatGPT write confirmation. For YouTube, continue only the saved upload after execute_next_step; the server queries its acknowledged byte range before streaming one bounded chunk. An uncertain session initialization requires manual reconciliation, never a replacement. For Reels, each call advances at most one mutation per target; continue this same requested workflow after read-only status checks report a ready checkpoint. Observe retry_at. Never recreate or blindly retry uncertain targets. The configured policy enforces owner approval or authenticated client-policy reliance."""
         return await publication_call('execute', publication_id=publication_id)
 
     @mcp.tool(annotations=read, structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read']}]})
     async def get_publication_status(publication_id: Short) -> dict[str, Any]:
-        """Read status and refresh acknowledged delivery metadata using Meta GETs only. Never publishes, resumes uploads or retries a mutation."""
+        """Read status and refresh acknowledged delivery metadata using provider GETs only. Never publishes, resumes uploads or retries a mutation."""
         return await publication_call('status', publication_id=publication_id)
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False), structured_output=True, meta={'securitySchemes': [{'type': 'oauth2', 'scopes': ['socialhub:read']}]})
@@ -282,7 +282,7 @@ def create_server(settings=None):
     @mcp.custom_route('/healthz', methods=['GET'])
     async def health(request):
         current = active.snapshot()
-        return JSONResponse({'status': 'ok', 'mode': 'live_guarded_publishing' if current.meta_live_writes and current.publishing_enabled else 'live_read_only' if current.meta_live_reads else 'mock'})
+        return JSONResponse({'status': 'ok', 'mode': 'live_guarded_publishing' if (current.meta_live_writes or current.youtube_publishing_enabled) and current.publishing_enabled else 'live_read_only' if current.meta_live_reads or current.youtube_enabled else 'mock'})
 
     @mcp.custom_route('/readyz', methods=['GET'])
     async def ready(request):
@@ -306,6 +306,8 @@ def create_server(settings=None):
     register_media_routes(mcp, active, sessions)
     from app.security.attachment_tools import register_attachment_tools
     register_attachment_tools(mcp, active, sessions)
+    from app.security.youtube_routes import register_youtube_routes
+    register_youtube_routes(mcp,settings,sessions)
     from app.security.meta_routes import register_meta_routes
     register_meta_routes(mcp, active, sessions)
     from app.security.approval_routes import register_approval_routes

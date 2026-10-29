@@ -44,6 +44,11 @@ class Hub:
             raise HubError('account_denied', 'Account is not allowlisted')
         if account.is_mock and self.live_reads:
             raise HubError('account_denied', 'Mock accounts are disabled while live reads are enabled')
+        if account.platform == 'youtube':
+            if (not self.settings.youtube_enabled or account.id != 'pixelpapa-youtube' or account.is_mock
+                    or account.remote_id not in self.settings.youtube_channel_ids):
+                raise HubError('account_denied', 'YouTube channel is not allowlisted')
+            return account
         if not account.is_mock:
             expected = {'facebook': PAGE_ID, 'instagram': INSTAGRAM_ID}.get(account.platform)
             if not self.live_reads:
@@ -62,10 +67,34 @@ class Hub:
         with self.sessions() as db:
             if operation == 'get_system_status':
                 db.execute(text('SELECT 1'))
-                return {'status': 'ok', 'database': 'ok', 'mode': 'live_guarded_publishing' if self.settings and self.settings.meta_live_writes and self.settings.publishing_enabled else 'live_read_only' if self.live_reads else 'mock', 'live_writes_enabled': bool(self.settings and self.settings.meta_live_writes and self.settings.publishing_enabled)}
+                return {'status': 'ok', 'database': 'ok', 'mode': 'live_guarded_publishing' if self.settings and (self.settings.meta_live_writes or self.settings.youtube_publishing_enabled) and self.settings.publishing_enabled else 'live_read_only' if self.live_reads or (self.settings and self.settings.youtube_enabled) else 'mock', 'live_writes_enabled': bool(self.settings and (self.settings.meta_live_writes or self.settings.youtube_publishing_enabled) and self.settings.publishing_enabled)}
             if operation == 'list_accounts':
-                return {'accounts': [{'id': a.id, 'name': a.name, 'platform': a.platform, 'account_type': a.account_type, 'mock': a.is_mock} for a in db.scalars(select(Account).where(Account.allowlisted.is_(True), Account.is_mock.is_(not self.live_reads))) if not self.live_reads or (a.id == f'pixelpapa-{a.platform}' and a.remote_id == {'facebook': PAGE_ID, 'instagram': INSTAGRAM_ID}.get(a.platform))]}
+                result=[]
+                for a in db.scalars(select(Account).where(Account.allowlisted.is_(True))):
+                    try:self.account(db,a.id)
+                    except HubError:continue
+                    if a.platform=='youtube':
+                        c=db.scalar(select(Credential).where(Credential.account_id==a.id))
+                        if not c or c.revoked:continue
+                    result.append({'id':a.id,'name':a.name,'platform':a.platform,'account_type':a.account_type,'mock':a.is_mock,
+                        **({'channel_id':a.remote_id} if a.platform=='youtube' else {})})
+                return {'accounts':result}
             account = self.account(db, account_id)
+            if account.platform=='youtube':
+                from app.connectors.youtube import YouTubeConnector,capabilities as youtube_capabilities
+                from app.services.youtube_oauth import access_token
+                await access_token(self.settings,self.sessions)
+                connector=YouTubeConnector(self.settings,self.sessions,account)
+                caps=youtube_capabilities()
+                caps.update(write_account_allowed=account.id in self.settings.youtube_write_account_ids,
+                    live_writes_enabled=self.settings.youtube_publishing_enabled and account.id in self.settings.youtube_write_account_ids,
+                    publish_short_enabled=self.settings.youtube_publishing_enabled and self.settings.youtube_shorts_enabled,
+                    publish_video_enabled=self.settings.youtube_publishing_enabled and self.settings.youtube_videos_enabled,
+                    publish_thumbnail_enabled=False,scheduling=False)
+                if operation=='get_account_capabilities':return {'account_id':account.id,'channel_id':account.remote_id,'channel':await connector.channel(account.remote_id),'mock':False,'capabilities':caps,
+                    'limitations':['Shorts classification is determined by YouTube','Public visibility and API project approval require live acceptance','Custom thumbnails and scheduling not implemented']}
+                if not caps.get(operation):raise HubError('unsupported_operation','YouTube operation unsupported')
+                return await getattr(connector,operation)(account.remote_id,**args)
             if account.is_mock:
                 if self.live_reads:
                     raise HubError('account_denied', 'Mock accounts are hidden while live reads are enabled')

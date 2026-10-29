@@ -5,6 +5,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
+from app.services.feature_flags import FEATURES
 from app.admin_ui import ASSETS, AccountView, ProviderView, provider_card
 from app.database.models import SiteConfiguration, Audit
 from app.main import create_server
@@ -48,9 +49,9 @@ async def test_server_filters_and_untrusted_feedback_are_escaped(sessions):
         result = await client.get('/admin/features', params={'q': '<img src=x onerror=alert(1)>', 'saved': '<script>alert(1)</script>'})
         assert result.status_code == 200
         assert '<img src=x' not in result.text and '<script>alert' not in result.text
-        assert '&lt;img' in result.text and '0 of 11 features' in result.text
+        assert '&lt;img' in result.text and f'0 of {len(FEATURES)} features' in result.text
         result = await client.get('/admin/features', params={'category': 'Facebook'})
-        assert '4 of 11 features' in result.text
+        assert f'4 of {len(FEATURES)} features' in result.text
         assert re.search(r'<tr data-feature[^>]+data-category="Instagram"[^>]+ hidden>', result.text)
         result = await client.get('/admin/features', params={'state': 'unavailable'})
         assert 'Not implemented' in result.text and 'Scheduling' in result.text
@@ -84,7 +85,7 @@ async def test_new_normalization_switch_shows_its_off_default(sessions):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_server(settings).streamable_http_app()), base_url=ORIGIN) as client:
         client.cookies.set('__Secure-socialhub-admin', cookie)
         page = await client.get('/admin/features', params={'q': 'normalization'})
-        assert '1 of 11 features' in page.text and 'Off by default' in page.text
+        assert f'1 of {len(FEATURES)} features' in page.text and 'Off by default' in page.text
         row = re.search(r'<tr data-feature[^>]*data-search="[^"]*normalization[\s\S]*?</tr>', page.text)[0]
         assert 'aria-checked="false"' in row and 'name="enabled" value="true"' in row
     with sessions() as db:assert db.get(SiteConfiguration, 'features') is None

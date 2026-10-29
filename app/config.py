@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     media_delivery_enabled: bool = True
     media_root: str = '/data/media'
 
+    youtube_enabled: bool = False
+    youtube_publishing_enabled: bool = False
+    youtube_shorts_enabled: bool = False
+    youtube_videos_enabled: bool = False
+    youtube_thumbnails_enabled: bool = False
+    youtube_channel_ids: list[str] = []
+    youtube_write_account_ids: list[Literal['pixelpapa-youtube']] = []
+    youtube_upload_chunk_bytes: int = 8 * 1024 * 1024
+    media_max_video_seconds: int = 600
+
     meta_app_id: str = ''
     meta_app_secret: SecretStr = SecretStr('')
     meta_graph_version: str = 'v26.0'
@@ -89,6 +99,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def secure_defaults(self):
+        import re
+        if any(not re.fullmatch(r'UC[A-Za-z0-9_-]{22}',v) for v in self.youtube_channel_ids):
+            raise ValueError('YouTube requires exact real channel IDs, never handles or emails')
+        if (not 256*1024 <= self.youtube_upload_chunk_bytes <= 16*1024*1024 or self.youtube_upload_chunk_bytes % (256*1024)
+                or not 1 <= self.media_max_video_seconds <= 12*3600):
+            raise ValueError('Invalid bounded video duration or YouTube chunk policy')
         if self.media_normalization_enabled and len(self.media_normalization_secret.get_secret_value()) < 64:
             raise ValueError('Media normalization requires its dedicated worker authentication secret')
         validate_url(self.public_url, https=False, path='/mcp')

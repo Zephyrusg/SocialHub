@@ -139,7 +139,9 @@ class Administration:
                 valid = bool(a and a.allowlisted and not a.is_mock and a.remote_id == remote and c
                     and not c.revoked and (not c.expires_at or c.expires_at > utcnow()))
                 accounts.append({'account_id': aid, 'connected': valid})
-        return {'revision': active._meta_configuration_revision, 'meta_app_id': active.meta_app_id,
+        from app.services.youtube_oauth import YouTubeSetup
+        youtube = YouTubeSetup(self.settings,self.sessions).status(subject)
+        return {'youtube':youtube, 'revision': active._meta_configuration_revision, 'meta_app_id': active.meta_app_id,
             'meta_secret_configured': bool(active.meta_app_secret.get_secret_value()),
             'live_reads': active.meta_live_reads, 'accounts': accounts,
             'administrator': True, 'publishing_permission': subject in self.settings.publishing_allowed_subjects,

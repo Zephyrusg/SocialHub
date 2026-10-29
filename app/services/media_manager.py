@@ -80,7 +80,7 @@ class MediaManager:
             duration = float(data['format']['duration'])
             if (len(data['streams']) > 16 or len([s for s in data['streams'] if s.get('codec_type') == 'video']) != 1
                     or len(audio) > 1 or video['codec_name'] != 'h264' or any(a != 'aac' for a in audio)
-                    or not math.isfinite(duration) or not 0 < duration <= 600
+                    or not math.isfinite(duration) or not 0 < duration <= self.settings.media_max_video_seconds
                     or not 1 <= min(video['width'], video['height']) <= max(video['width'], video['height']) <= 4096):
                 raise ValueError()
             try:
@@ -97,7 +97,7 @@ class MediaManager:
         except FileNotFoundError:
             raise HubError('media_validator_unavailable', 'ffprobe is required for video validation; use the Docker runtime') from None
         except (subprocess.SubprocessError, ValueError, KeyError, StopIteration, TypeError, ZeroDivisionError, OverflowError, OSError):
-            raise HubError('invalid_media', 'MP4 must contain H.264 video and optional AAC audio, with duration at most ten minutes') from None
+            raise HubError('invalid_media', 'MP4 must contain H.264 video and optional AAC audio, within the configured video duration limit') from None
 
     def save(self, temporary_path, principal='local-owner', *, consume=False):
         temporary_path = Path(temporary_path)

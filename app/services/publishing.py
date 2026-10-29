@@ -13,6 +13,7 @@ from app.security.tokens import TokenVault
 from app.connectors.meta import GraphClient, FacebookConnector, InstagramConnector
 from app.connectors.meta_policy import capabilities
 from app.connectors.publishing import MetaPublishingConnector
+from app.connectors.youtube import YouTubePublishingConnector
 from app.connectors.reels import REEL_READ_STAGES, REEL_UPLOAD_STAGES, REEL_READY_STAGES
 from app.services.approval_policy import ApprovalPolicy
 from app.services.write_access import require_write_accounts
@@ -36,7 +37,7 @@ class PublishingService:
         from app.services.hub import Hub
         active = effective_settings(self.settings, self.sessions)
         if execute:
-            if not active.meta_live_writes or not active.publishing_enabled:
+            if not active.publishing_enabled or (account_id != 'pixelpapa-youtube' and not active.meta_live_writes):
                 raise HubError('live_writes_disabled', 'Live publishing is paused')
             self.require_platforms(active, {'account_ids':[account_id]})
         with self.sessions() as db:
@@ -46,6 +47,11 @@ class PublishingService:
             credential = db.scalar(select(Credential).where(Credential.account_id == account_id))
             if not credential:
                 raise HubError('meta_not_connected', 'Connect and verify the account before preparing content')
+            if account.platform == 'youtube':
+                from app.connectors.youtube import YouTubeConnector, YouTubePublishingConnector, capabilities as youtube_capabilities
+                if credential.revoked:raise HubError('youtube_reauthorization_required','Reconnect the YouTube channel')
+                adapter = self.connector_factory(account,execute) if self.connector_factory else YouTubePublishingConnector(YouTubeConnector(active,self.sessions,account),execute)
+                return account,youtube_capabilities(),adapter
             token = TokenVault([active.encryption_key.get_secret_value()]).decrypt(credential)
             caps = capabilities(account.platform, credential.scopes, token.get('tasks', []), account.account_type)
             if self.connector_factory:
@@ -64,6 +70,7 @@ class PublishingService:
         if not isinstance(request, PublicationRequest):
             request = PublicationRequest.model_validate(request)
         data = request.model_dump()
+        if data.get('youtube') is None:data.pop('youtube',None)
         if data['content_type'] == 'reel':
             if data['is_ai_generated'] is None:
                 data['is_ai_generated'] = self.settings.reels_ai_generated_default
@@ -72,7 +79,9 @@ class PublishingService:
             data.pop('is_ai_generated')
         data['account_ids'] = sorted(data['account_ids'])
         require_write_accounts(self.settings, data['account_ids'])
-        assets = [self.media.get(mid, principal) for mid in data['media_ids']]
+        mids=list(data['media_ids'])
+        if data.get('youtube',{}).get('thumbnail_media_id'):mids.append(data['youtube']['thumbnail_media_id'])
+        assets = [self.media.get(mid, principal) for mid in mids]
         for asset in assets:
             if not asset['metadata'].get('validated'):
                 raise HubError('invalid_media', 'Upload media through the validated ingestion workflow')
@@ -84,6 +93,10 @@ class PublishingService:
             if not caps.get(operation):
                 raise HubError('unsupported_operation', 'Account permissions/tasks do not support the requested operation')
         payload = {'request': data, 'assets': assets}
+        if data.get('youtube'):
+            payload['youtube_channel']={'id':account.remote_id,'name':account.name}
+            payload['expected_short']=bool(assets[0]['metadata']['width']<=assets[0]['metadata']['height'] and assets[0]['metadata']['duration']<=180)
+            payload['classification_guaranteed']=False
         digest = content_hash(payload)
         try:
             with self.sessions.begin() as db:
@@ -123,6 +136,10 @@ class PublishingService:
         if not request['media_ids']:
             return True
         for aid in request['account_ids']:
+            if aid == 'pixelpapa-youtube':
+                if not active.youtube_publishing_enabled or not getattr(active,'youtube_shorts_enabled' if request['content_type']=='short' else 'youtube_videos_enabled'):
+                    return False
+                if request.get('youtube',{}).get('thumbnail_media_id'):return False
             if aid == 'pixelpapa-facebook':
                 if not active.facebook_media_publishing_enabled or request['content_type'] not in active.facebook_media_allowed_types:
                     return False
@@ -137,6 +154,8 @@ class PublishingService:
     @staticmethod
     def refreshable(target, request):
         stage = target['checkpoint'].get('stage')
+        if request.get('youtube'):
+            return target['state'] in {'processing','retryable','uncertain'} and stage in {'yt_processing','delivered'}
         if target['state'] in {'processing', 'retryable'} and stage in {'delivered', 'video_processing'}:
             return True
         return (request['content_type'] == 'reel'
@@ -150,6 +169,8 @@ class PublishingService:
         if target.state == 'sending':
             return 'wait_for_active_claim'
         stage = target.checkpoint.get('stage')
+        if stage == 'yt_upload':return 'execute_next_step'
+        if stage == 'yt_processing':return 'poll_status'
         if target.state == 'uncertain':
             if stage == 'ig_reel_ready' or stage not in REEL_READ_STAGES | REEL_UPLOAD_STAGES | {'fb_reel_ready'}:
                 return 'manual_reconciliation'
@@ -177,22 +198,22 @@ class PublishingService:
                 state = 'in_progress'
             return {'publication_id': item.id, 'request_hash': item.request_hash, 'principal': item.principal,
                 'preview': item.payload, 'state': state, 'requires_owner_approval': not bool(approval and approval.expires_at > self.clock()),
-                'live_writes_enabled': bool(active.meta_live_writes and active.publishing_enabled
+                'live_writes_enabled': bool(active.publishing_enabled and (active.youtube_publishing_enabled if item.payload['request'].get('youtube') else active.meta_live_writes)
                     and self.platforms_enabled(active, item.payload['request'])
                     and self.media_write_allowed(item.payload['request'], active)
-                    and all(aid in self.settings.meta_write_account_ids for aid in item.payload['request']['account_ids'])),
+                    and all(aid in self.settings.meta_write_account_ids + self.settings.youtube_write_account_ids for aid in item.payload['request']['account_ids'])),
                 'approval_channel': approval.channel if approval else None,
                 'independent_owner_approval': bool(approval and approval.channel in {'owner_cli', 'owner_portal'} and approval.expires_at > self.clock()),
                 'targets': [{'target_id': t.id, 'account_id': t.account_id, 'state': t.state,
                     'next_action': self.next_action(t),
                     'delivery_confirmed': t.state == 'succeeded' or t.checkpoint.get('stage') == 'delivered',
-                    'checkpoint': {k: v for k, v in t.checkpoint.items() if k in {'stage', 'remote_id', 'container_id', 'polls'}},
+                    'checkpoint': {k: v for k, v in t.checkpoint.items() if k in {'stage', 'remote_id', 'container_id', 'polls', 'offset', 'size'}},
                     'result': t.result, 'error': {'code': t.error_code, 'message': t.error_message} if t.error_code else None,
                     'attempts': t.attempts, 'retry_at': t.next_attempt_at.isoformat() + 'Z' if t.next_attempt_at else None} for t in targets]}
 
     def approve(self, publication_id, expected_hash, issuer, explicit_request, *, channel='owner_cli'):
         """Trusted LOCAL OWNER channel only. Deliberately not exposed through MCP/HTTP."""
-        if not self.settings.meta_live_writes or not self.settings.publishing_enabled:
+        if not self.settings.publishing_enabled or not (self.settings.meta_live_writes or self.settings.youtube_publishing_enabled):
             raise HubError('live_writes_disabled', 'Owner approvals are disabled while the live publishing feature is off')
         if not issuer or not explicit_request.strip():
             raise HubError('authorization_required', 'Local owner identity and explicit request evidence are required')
@@ -248,9 +269,9 @@ class PublishingService:
                 and grant.evidence_hash == policy.fingerprint())
             result['owner_grant_valid'] = bool(owner_valid)
             result['current_grant_valid'] = bool(owner_valid or policy_valid)
-            result['write_accounts_allowed'] = all(aid in self.settings.meta_write_account_ids for aid in item.payload['request']['account_ids'])
+            result['write_accounts_allowed'] = all(aid in self.settings.meta_write_account_ids + self.settings.youtube_write_account_ids for aid in item.payload['request']['account_ids'])
             result['media_write_allowed'] = self.media_write_allowed(item.payload['request'], active)
-            result['live_writes_enabled'] = bool(result['media_write_allowed'] and result['write_accounts_allowed'] and self.platforms_enabled(active, item.payload['request']) and active.meta_live_writes and active.publishing_enabled)
+            result['live_writes_enabled'] = bool(result['media_write_allowed'] and result['write_accounts_allowed'] and self.platforms_enabled(active, item.payload['request']) and (active.youtube_publishing_enabled if item.payload['request'].get('youtube') else active.meta_live_writes) and active.publishing_enabled)
             if grant and not (owner_valid or policy_valid):
                 result.update(independent_owner_required=True, execution_channel='independent_owner',
                               next_step='The prior grant expired, was revoked, or no longer matches policy. A fresh independent owner decision is required; do not retry or mint a replacement automatically.')
@@ -290,7 +311,7 @@ class PublishingService:
             target = db.get(PublicationTarget, target_id)
             if not target or target.publication_id != item.id:
                 raise HubError('publication_denied', 'Target does not belong to the approved preview')
-            if target.state in {'succeeded', 'failed', 'uncertain'}:
+            if target.state in {'succeeded', 'failed'} or (target.state=='uncertain' and not (target.account_id=='pixelpapa-youtube' and target.checkpoint.get('stage')=='yt_upload' and target.checkpoint.get('session'))):
                 return None
             if target.state == 'sending':
                 if target.lease_until and target.lease_until <= self.clock():
@@ -298,7 +319,7 @@ class PublishingService:
                 return None
             if target.next_attempt_at and target.next_attempt_at > self.clock():
                 return None
-            if target.attempts >= 20:
+            if target.attempts >= (4096 if target.account_id=='pixelpapa-youtube' else 20):
                 target.state, target.error_code, target.error_message = 'failed', 'attempt_limit', 'Workflow exceeded its bounded attempt budget'
                 return None
             lease = str(uuid4())
@@ -311,18 +332,18 @@ class PublishingService:
 
     def execution_settings(self):
         active = effective_settings(self.settings, self.sessions)
-        if not active.meta_live_writes or not active.publishing_enabled:
+        if not active.publishing_enabled or not (active.meta_live_writes or active.youtube_publishing_enabled):
             raise HubError('live_writes_disabled', 'Live publishing remains disabled; preparing a preview does not authorize public writes')
         return active
 
     @staticmethod
     def platforms_enabled(active, request):
-        return all(active._feature_states['facebook_publishing' if aid == 'pixelpapa-facebook' else 'instagram_publishing']['effective'] for aid in request['account_ids'])
+        return all(active._feature_states['youtube_publishing' if aid=='pixelpapa-youtube' else 'facebook_publishing' if aid == 'pixelpapa-facebook' else 'instagram_publishing']['effective'] for aid in request['account_ids'])
 
     @staticmethod
     def require_platforms(active, request):
         for aid in request['account_ids']:
-            name = 'facebook_publishing' if aid == 'pixelpapa-facebook' else 'instagram_publishing'
+            name = 'youtube_publishing' if aid=='pixelpapa-youtube' else 'facebook_publishing' if aid == 'pixelpapa-facebook' else 'instagram_publishing'
             if not active._feature_states[name]['effective']:
                 raise HubError('publishing_feature_disabled', 'Publishing is paused for a selected platform; the immutable preview is preserved')
 
@@ -335,10 +356,10 @@ class PublishingService:
         require_write_accounts(self.settings, current['preview']['request']['account_ids'])
         self.require_platforms(active, current['preview']['request'])
         if not self.media_write_allowed(current['preview']['request']):
-            raise HubError('facebook_media_publishing_disabled' if 'pixelpapa-facebook' in current['preview']['request']['account_ids'] else 'instagram_reels_publishing_disabled', 'Media publishing is not activated for every selected target; the prepared preview is preserved')
+            raise HubError('facebook_media_publishing_disabled' if 'pixelpapa-facebook' in current['preview']['request']['account_ids'] else 'youtube_publishing_disabled' if current['preview']['request'].get('youtube') else 'instagram_reels_publishing_disabled', 'Media publishing is not activated for every selected target; the prepared preview is preserved')
         for target in current['targets']:
             if (self.refreshable(target, current['preview']['request'])
-                    and isinstance(self.context(target['account_id'], execute=False)[2], MetaPublishingConnector)):
+                    and isinstance(self.context(target['account_id'], execute=False)[2], (MetaPublishingConnector, YouTubePublishingConnector))):
                 # Acknowledged work needs only status reads, not another claim,
                 # source-file check, upload URL or publication attempt.
                 continue
@@ -356,7 +377,12 @@ class PublishingService:
                 if not caps.get(operation):
                     raise HubError('permission_denied', 'Account permission or Page task no longer permits this operation')
                 for asset in payload['assets']:
-                    if request['content_type'] == 'reel':
+                    if request.get('youtube'):
+                        if asset['id']==request['media_ids'][0]:
+                            request['_media_path']=str(self.media.path(asset['id'],asset['sha256'])[0])
+                            self.media.reserve_delivery(asset['id'])
+                            request['_media_sha256'],request['_media_size']=asset['sha256'],asset['size']
+                    elif request['content_type'] == 'reel':
                         if not checkpoint or checkpoint.get('stage') in REEL_UPLOAD_STAGES:
                             request['_media_path'] = str(self.media.path(asset['id'], asset['sha256'])[0])
                             self.media.reserve_delivery(asset['id'])
@@ -374,7 +400,10 @@ class PublishingService:
                 if claim.get('approval_channel') == 'chatgpt_policy' and not ApprovalPolicy(fresh).eligible(principal, payload, context):
                     raise HubError('authorization_required', 'Direct publishing was paused before dispatch')
                 sent = True  # From here an exception can mean an ambiguous external outcome.
-                outcome = await adapter.step(account.remote_id, request, checkpoint)
+                if account.platform=='youtube':
+                    from app.services.youtube_lock import upload_lock
+                    with upload_lock(self.settings.media_root):outcome = await adapter.step(account.remote_id, request, checkpoint)
+                else:outcome = await adapter.step(account.remote_id, request, checkpoint)
                 self.finish(publication_id, target['target_id'], principal, claim['lease'], outcome)
             except HubError as error:
                 # Durable checkpoint proves a delivered object; metadata-only reads can retry safely.
@@ -386,7 +415,7 @@ class PublishingService:
                 state = 'uncertain' if uncertain else 'retryable' if retry else 'failed'
                 self.finish(publication_id, target['target_id'], principal, claim['lease'],
                     {'state': state, 'checkpoint': checkpoint, 'error_code': error.code, 'error_message': error.message[:256],
-                     'timeout_phase': error.diagnostics.get('timeout_phase'), 'retry_after': 60 if retry else 0})
+                     'timeout_phase': error.diagnostics.get('timeout_phase'), 'retry_after': min(max(error.diagnostics.get('retry_after',60),1),86400) if retry else 0})
             except Exception:
                 # Never expose provider exceptions or silently resend after an unexpected failure.
                 self.finish(publication_id, target['target_id'], principal, claim['lease'],
@@ -409,9 +438,9 @@ class PublishingService:
                 checkpoint = dict(current.checkpoint)
             try:
                 account, _, adapter = self.context(snapshot['account_id'], execute=False)
-                if not isinstance(adapter, MetaPublishingConnector):
+                if not isinstance(adapter, (MetaPublishingConnector, YouTubePublishingConnector)):
                     continue
-                if preview['preview']['request']['content_type'] == 'reel' and checkpoint.get('stage') != 'delivered':
+                if account.platform!='youtube' and preview['preview']['request']['content_type'] == 'reel' and checkpoint.get('stage') != 'delivered':
                     outcome = await adapter.reel_refresh(account.remote_id, preview['preview']['request'], checkpoint,
                         uncertain=snapshot['state'] == 'uncertain')
                 else:
@@ -518,22 +547,25 @@ class PublishingService:
         request = preview['preview']['request']
         account, _, adapter = self.context(aid, execute=False)
         # Reconciliation is a connector read operation, not a generic remote-ID acceptance.
-        if not isinstance(adapter, MetaPublishingConnector):
+        if not isinstance(adapter, (MetaPublishingConnector, YouTubePublishingConnector)):
             raise HubError('unsupported_operation', 'This connector has no verified reconciliation reader')
         if request['operation'] == 'reply':
             raise HubError('manual_check_required', 'Reply outcome needs a parent-bound reply reader; no automatic resend is allowed')
         if request['operation'] == 'update' and remote_id != request['post_id']:
             raise HubError('reconciliation_denied', 'An edit can only reconcile its original owned post ID')
         instagram_reel = request['operation'] == 'publish' and request['content_type'] == 'reel' and account.platform == 'instagram'
-        if request['operation'] == 'publish' and request['content_type'] not in {'text', 'link', 'image'} and not instagram_reel:
+        if request['operation'] == 'publish' and request['content_type'] not in {'text', 'link', 'image'} and not instagram_reel and account.platform!='youtube':
             raise HubError('manual_check_required', 'Video/Reel reconciliation requires verified processing evidence; no resend is allowed')
-        if instagram_reel:
+        if account.platform=='youtube':
+            post = await adapter.verify_reconciliation(account.remote_id,request,remote_id,created,preview['preview']['assets'][0])
+        elif instagram_reel:
             from app.services.reel_reconciliation import verified_instagram_reel
             post = await verified_instagram_reel(adapter, account.remote_id, request, checkpoint,
                                                   remote_id, created, finish_attempt)
         else:
             post = await adapter.connector.get_post(account.remote_id, remote_id)
         remote_text = post.get('message') if account.platform == 'facebook' else post.get('caption')
+        if account.platform=='youtube':remote_text = ''  # Structured metadata verified by its own provider reader.
         if instagram_reel and remote_text is None:
             remote_text = ''
         if remote_text != request['text']:
@@ -544,7 +576,7 @@ class PublishingService:
                 raise HubError('reconciliation_denied', 'Owner-selected image outcome must contain exactly one Facebook photo')
         if request['operation'] == 'publish':
             try:
-                stamp = datetime.fromisoformat((post.get('created_time') or post.get('timestamp') or '').replace('Z', '+00:00'))
+                stamp = datetime.fromisoformat((post.get('created_time') or post.get('timestamp') or post.get('snippet',{}).get('publishedAt') or '').replace('Z', '+00:00'))
                 if stamp.tzinfo is None or stamp.astimezone(timezone.utc).replace(tzinfo=None) < created - timedelta(minutes=2):
                     raise ValueError()
             except ValueError:
@@ -562,8 +594,11 @@ class PublishingService:
                 raise HubError('reconciliation_denied', 'Remote post is already bound to another publication')
             target.state = 'succeeded'
             target.result = {'remote_id': remote_id, 'permalink': adapter.permalink(post), 'reconciled': True}
+            if account.platform=='youtube':
+                target.result.update(privacy_requested=request['youtube']['visibility'],privacy_actual=post.get('status',{}).get('privacyStatus'),
+                    public_visibility_confirmed=post.get('status',{}).get('privacyStatus')=='public',processing_confirmed=True)
             target.checkpoint = {'stage': 'delivered', 'remote_id': remote_id, 'reconciled': True}
-            if instagram_reel:
+            if instagram_reel or account.platform=='youtube':
                 target.checkpoint = dict(checkpoint, **target.checkpoint)
             target.error_code, target.error_message, target.next_attempt_at = None, None, None
             self.remember_post(db, publication_id, target)
