@@ -95,8 +95,8 @@ def _wrap_text(text, face):
 def subtitle_layout(song_title):
     """Wrap and reduce type size within a bounded band; never clip or cover artwork."""
     title = validate_subtitle('title', song_title)
-    for size in (40, 36, 32):
-        face = font('DejaVuSans.ttf', size)
+    for size in (56, 52, 48, 44, 40, 36, 32):
+        face = font('DejaVuSerif-Bold.ttf', size)
         text = _safe_text(title, face)
         lines = _wrap_text(text, face)
         if len(lines) > 3:

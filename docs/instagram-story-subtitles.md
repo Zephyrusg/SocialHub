@@ -17,7 +17,7 @@ background, branding, Music sticker space and bottom UI safe area remain. Defaul
 hidden rendering is byte-for-byte identical to the previously approved clean
 cinematic design. No OCR or external service is used. In title mode the title is
 centered, measured in pixels, wrapped to at most three lines and reduced from
-40 px to 36/32 px if needed. The cover moves only enough to preserve spacing and
+a prominent 56 px bold serif through smaller sizes down to 32 px only when needed. The cover moves only enough to preserve spacing and
 always ends above the artist branding. Titles that still cannot fit safely are
 rejected with a shortening instruction; no characters are silently truncated.
 Unsupported glyphs receive the existing explicit text error.
@@ -70,3 +70,8 @@ Story render keys, unchanged legacy feed hashes, runtime disable behavior and
 MCP optional-schema/argument forwarding. Both real-cover variants passed local
 signed phone-page and download checks. The hidden preview matches the previously
 approved JPEG checksum exactly. No production changes or publications occurred.
+
+Visual refinement after initial review: title subtitles now use the bundled bold
+serif at 56 px for a stronger song-title treatment, reducing only for longer text.
+Focused layout/glyph/idempotency checks were rerun; the hidden preview still
+matches the approved clean design exactly. Production remains unchanged.

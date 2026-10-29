@@ -34,7 +34,7 @@ def test_long_title_wraps_without_losing_words():
     title='A New Adventure Beyond the Mountains and Across the Sea Where the Stars Will Always Guide Us Home Again'
     lines,face,top=subtitle_layout(title)
     assert len(lines)>1 and ' '.join(lines)==title
-    assert 32<=face.size<=40 and top<=480
+    assert 32<=face.size<=56 and top<=480
     assert all(face.getlength(line)<=880 for line in lines)
     assert top+840<=1320  # Artist branding starts at y=1340.
 
