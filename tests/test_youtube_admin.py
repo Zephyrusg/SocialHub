@@ -34,3 +34,13 @@ async def test_youtube_callback_rejects_bad_state_and_untrusted_proxy(sessions):
         for path in ['/youtube/oauth/callback','/youtube/oauth/callback?state=a&state=b&code=x','/youtube/oauth/callback?state=untrusted-state&code=x']:
             r=await c.get(path);assert r.status_code==400 and 'synthetic' not in r.text
         assert (await c.get('/admin/youtube/avatar')).status_code==404
+
+async def test_first_time_google_settings_are_expanded_and_blank(sessions):
+    s=config(sessions,youtube_enabled=True,youtube_channel_ids=[CID]);browser=AdminSessions(s,sessions);cookie=browser.create_session('owner-sub')
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_server(s).streamable_http_app()),base_url=ORIGIN) as c:
+        c.cookies.set('__Secure-socialhub-admin',cookie)
+        r=await c.get('/admin/connections');assert r.status_code==200
+        import re
+        panel=re.search(r'<details class="credentials-panel" open><summary>Google OAuth[\s\S]+?</details>',r.text)
+        assert panel and 'Setup required' in panel[0] and 'name="client_id"' in panel[0] and 'name="client_secret"' in panel[0]
+        assert SECRET not in panel[0]
