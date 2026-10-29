@@ -245,8 +245,9 @@ async def test_resumable_chunks_persist_acknowledged_progress(yt_settings,sessio
 
 async def test_expired_session_stays_uncertain_and_never_restarts(yt_settings,sessions):
     service,g,p,_,execute,_=await publisher(yt_settings,sessions);await execute();g.expired_session=True
-    r=await execute();assert r['state']=='attention_required' and r['targets'][0]['error']['code']=='write_outcome_unknown'
-    await execute()
+    r=await execute();assert r['state']=='attention_required' and r['targets'][0]['error']['code']=='youtube_upload_session_expired'
+    assert r['targets'][0]['next_action']=='manual_reconciliation'
+    count=len(g.calls);await execute();assert len(g.calls)==count
     assert sum(m=='POST' for m,path in g.calls if path!='/token')==1
 
 async def test_processing_pending_then_private_actual_visibility(yt_settings,sessions):
@@ -342,3 +343,28 @@ async def test_disconnect_invalidates_pending_oauth_and_inflight_revision(yt_set
     count=len(g.calls)
     with pytest.raises(HubError):await oauth.complete(state,cookie,'synthetic-code')
     assert len(g.calls)==count
+
+async def test_longer_youtube_video_policy_does_not_expand_meta_subset(yt_settings,sessions):
+    yt_settings.media_max_video_seconds=7200
+    g,_=await connected(yt_settings,sessions)
+    with sessions() as db:a=db.get(Account,ACCOUNT)
+    yt=YouTubePublishingConnector(YouTubeConnector(yt_settings,sessions,a,httpx.MockTransport(g)))
+    assets=[{'mime_type':'video/mp4','size':1000,'metadata':{'validated':True,'width':1280,'height':720,'duration':900,'video_codec':'h264','audio_codecs':['aac']}}]
+    await yt.validate(CID,{'operation':'publish','content_type':'video','text':'','youtube':META},assets)
+    from app.connectors.meta import GraphClient,FacebookConnector
+    from app.connectors.publishing import MetaPublishingConnector
+    from app.connectors.meta_policy import PAGE_ID
+    fb=MetaPublishingConnector(FacebookConnector(GraphClient('synthetic','v26.0'),PAGE_ID))
+    with pytest.raises(HubError) as error:await fb.validate(PAGE_ID,{'operation':'publish','content_type':'video','text':'','media_ids':['asset']},assets)
+    assert error.value.code=='invalid_media'
+
+
+def test_youtube_policy_extension_preserves_existing_meta_grants(yt_settings):
+    from app.services.approval_policy import ApprovalPolicy
+    policy=ApprovalPolicy(yt_settings)
+    meta={'request':{'account_ids':['pixelpapa-facebook']}}
+    youtube={'request':{'account_ids':[ACCOUNT]}}
+    legacy=policy.fingerprint(meta);yt=policy.fingerprint(youtube)
+    yt_settings.youtube_write_account_ids=[]
+    assert policy.fingerprint(meta)==legacy
+    assert policy.fingerprint(youtube)!=yt

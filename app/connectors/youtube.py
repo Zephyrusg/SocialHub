@@ -195,7 +195,8 @@ class YouTubePublishingConnector:
                 return {'state':'processing','error_code':e.code,'error_message':'Query the saved YouTube upload session before continuing; never create a replacement',
                     'retry_after':max(min(5*2**min(int(state.get('failures',0)),6),300),e.diagnostics.get('retry_after',0)),'checkpoint':dict(state,failures=min(int(state.get('failures',0))+1,20))}
             if e.code=='youtube_api_error' and e.diagnostics.get('http_status') in {404,410}:
-                raise HubError('write_outcome_unknown','Saved YouTube session expired; reconcile the existing outcome before any replacement') from None
+                return {'state':'uncertain','checkpoint':dict(state,session_expired=True),
+                    'error_code':'youtube_upload_session_expired','error_message':'Saved upload session expired; reconcile the existing outcome manually before any replacement'}
             raise
 
     @staticmethod

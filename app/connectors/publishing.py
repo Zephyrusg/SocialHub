@@ -65,6 +65,8 @@ class MetaPublishingConnector(ReelWorkflows):
             elif request['content_type'] in {'video', 'reel'}:
                 if asset['mime_type'] != 'video/mp4':
                     raise HubError('invalid_media', 'Video/Reel content requires a validated MP4 asset')
+                if request['content_type']=='video' and meta.get('duration',0)>600:
+                    raise HubError('invalid_media','The existing Meta regular-video subset is limited to ten minutes; longer-file policy is for YouTube')
                 if request['content_type'] == 'reel':
                     if len(request['text']) > 2200:
                         raise HubError('invalid_content', 'Reel captions are limited to 2200 characters in this service')

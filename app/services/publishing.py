@@ -169,7 +169,7 @@ class PublishingService:
         if target.state == 'sending':
             return 'wait_for_active_claim'
         stage = target.checkpoint.get('stage')
-        if stage == 'yt_upload':return 'execute_next_step'
+        if stage == 'yt_upload':return 'manual_reconciliation' if target.checkpoint.get('session_expired') else 'execute_next_step'
         if stage == 'yt_processing':return 'poll_status'
         if target.state == 'uncertain':
             if stage == 'ig_reel_ready' or stage not in REEL_READ_STAGES | REEL_UPLOAD_STAGES | {'fb_reel_ready'}:
@@ -266,7 +266,7 @@ class PublishingService:
             owner_valid = current and grant.channel in {'owner_cli', 'owner_portal'}
             policy_valid = bool(current and grant.channel == 'chatgpt_policy'
                 and not result['independent_owner_required'] and grant.oauth_client_id == context.oauth_client_id
-                and grant.evidence_hash == policy.fingerprint())
+                and grant.evidence_hash == policy.fingerprint(item.payload))
             result['owner_grant_valid'] = bool(owner_valid)
             result['current_grant_valid'] = bool(owner_valid or policy_valid)
             result['write_accounts_allowed'] = all(aid in self.settings.meta_write_account_ids + self.settings.youtube_write_account_ids for aid in item.payload['request']['account_ids'])
@@ -290,7 +290,7 @@ class PublishingService:
             approval = db.scalar(select(PublicationApproval).where(PublicationApproval.publication_id == publication_id).with_for_update())
             if approval is None and policy.eligible(principal, item.payload, context):
                 approval = PublicationApproval(publication_id=item.id, principal=principal, request_hash=item.request_hash,
-                    issuer='chatgpt-policy', evidence_hash=policy.fingerprint(),
+                    issuer='chatgpt-policy', evidence_hash=policy.fingerprint(item.payload),
                     channel='chatgpt_policy', oauth_client_id=context.oauth_client_id,
                     expires_at=self.clock() + timedelta(hours=1))
                 db.add(approval)
@@ -304,14 +304,14 @@ class PublishingService:
             if approval and approval.channel == 'chatgpt_policy':
                 if (not policy.eligible(principal, item.payload, context)
                         or approval.oauth_client_id != context.oauth_client_id
-                        or approval.evidence_hash != policy.fingerprint()):
+                        or approval.evidence_hash != policy.fingerprint(item.payload)):
                     raise HubError('authorization_required', 'ChatGPT policy or authenticated client changed; independent owner authorization required')
             if not approval or approval.principal != principal or approval.request_hash != item.request_hash or approval.expires_at <= self.clock():
                 raise HubError('authorization_required', 'A current exact approval or explicitly enabled authenticated ChatGPT policy is required')
             target = db.get(PublicationTarget, target_id)
             if not target or target.publication_id != item.id:
                 raise HubError('publication_denied', 'Target does not belong to the approved preview')
-            if target.state in {'succeeded', 'failed'} or (target.state=='uncertain' and not (target.account_id=='pixelpapa-youtube' and target.checkpoint.get('stage')=='yt_upload' and target.checkpoint.get('session'))):
+            if target.state in {'succeeded', 'failed'} or (target.state=='uncertain' and not (target.account_id=='pixelpapa-youtube' and target.checkpoint.get('stage')=='yt_upload' and target.checkpoint.get('session') and not target.checkpoint.get('session_expired'))):
                 return None
             if target.state == 'sending':
                 if target.lease_until and target.lease_until <= self.clock():

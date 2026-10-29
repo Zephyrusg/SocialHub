@@ -28,14 +28,15 @@ class ApprovalPolicy:
             and all(aid in s.meta_write_account_ids + s.youtube_write_account_ids for aid in payload['request']['account_ids'])
             and len(payload['request']['account_ids']) == 1)
 
-    def fingerprint(self):
+    def fingerprint(self, payload=None):
         s = self.settings
         values = [s.approval_mode, s.oauth_issuer, s.oauth_audience,
                   sorted(s.chatgpt_allowed_client_ids), sorted(s.chatgpt_allowed_principals), sorted(s.publishing_allowed_subjects),
                   sorted(s.chatgpt_allowed_operations), sorted(s.meta_write_account_ids), s.chatgpt_confirmation_tested,
                   s.chatgpt_confirmation_evidence_sha256, s.chatgpt_direct_tested,
                   s.chatgpt_direct_evidence_sha256, s.chatgpt_residual_risk_accepted]
-        if s.youtube_write_account_ids:values.append(sorted(s.youtube_write_account_ids))
+        if payload and 'pixelpapa-youtube' in payload['request']['account_ids']:
+            values.append(['youtube-policy-v1',sorted(s.youtube_write_account_ids)])
         return hashlib.sha256(json.dumps(values, separators=(',', ':')).encode()).hexdigest()
 
     def requirements(self, principal, payload, context=None):
