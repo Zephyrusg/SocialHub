@@ -46,7 +46,15 @@ def request(port, *, overrides=None, body=BODY, job='a'*32):
     connection=http.client.HTTPConnection('127.0.0.1',port,timeout=3)
     connection.request('POST','/v1/normalize',body,headers)
     response=connection.getresponse();data=response.read();out=(response.status,dict(response.getheaders()),data)
-    connection.close();return out
+    connection.close()
+    # The zero-length error response can reach the client just before the
+    # handler's finally block deletes scratch. A second serial request is a
+    # deterministic completion barrier, without sleep-based cleanup assertions.
+    barrier=http.client.HTTPConnection('127.0.0.1',port,timeout=3)
+    barrier.request('GET','/healthz');ready=barrier.getresponse()
+    assert ready.status==200
+    ready.read();barrier.close()
+    return out
 
 
 def test_authentication_digest_signed_result_and_replay(worker):
