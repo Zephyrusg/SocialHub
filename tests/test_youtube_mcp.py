@@ -27,7 +27,7 @@ async def test_youtube_mcp_preview_and_read_capabilities(yt_settings,sessions,mo
             await rpc('initialize',{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'pytest','version':'1'}})
             tools=(await rpc('tools/list',{}))['tools'];prepare=next(t for t in tools if t['name']=='prepare_publication')
             assert 'youtube' in prepare['inputSchema']['properties'] and prepare['annotations']['readOnlyHint'] is False
-            assert len(tools)==20  # No parallel publication state machine/tools.
+            assert len(tools)==21  # One image preparation tool; shared publication tools remain unchanged.
             r=(await rpc('tools/call',{'name':'prepare_publication','arguments':{'account_ids':[ACCOUNT],'content_type':'short',
                 'media_ids':[asset['id']],'youtube':META,'idempotency_key':'mcp-youtube'}}))['structuredContent']
             assert r['ok'] and r['data']['state']=='prepared' and not r['data']['live_writes_enabled']

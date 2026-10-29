@@ -77,6 +77,9 @@ def register_media_routes(mcp, settings, sessions):
                 if len(request.query_params.getlist('expires')) != 1 or len(request.query_params.getlist('signature')) != 1:
                     raise HubError('media_access_denied', 'Media authorization required')
                 path, mime = await asyncio.to_thread(manager.verify_signature, mid, request.query_params.get('expires'), request.query_params.get('signature'))
-            return FileResponse(path, media_type=mime, headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer'})
+            extension = {'image/jpeg': '.jpg', 'image/png': '.png', 'video/mp4': '.mp4'}[mime]
+            filename = 'socialhub-' + mid + extension if request.query_params.get('download') == '1' else None
+            return FileResponse(path, media_type=mime, filename=filename, headers={
+                'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer'})
         except HubError:
             return JSONResponse({'error': 'media_access_denied'}, status_code=403, headers={'Cache-Control': 'no-store'})

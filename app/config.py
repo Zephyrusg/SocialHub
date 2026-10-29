@@ -94,6 +94,8 @@ class Settings(BaseSettings):
     media_image_max_pixels: int = 16_000_000
     facebook_media_publishing_enabled: bool = False
     facebook_media_allowed_types: list[Literal['image', 'video', 'reel']] = ['image', 'video']
+    instagram_photos_enabled: bool = False
+    instagram_story_artwork_enabled: bool = False
     instagram_reels_publishing_enabled: bool = False
     reels_ai_generated_default: bool = True
 

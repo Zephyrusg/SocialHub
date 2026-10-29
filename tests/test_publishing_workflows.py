@@ -56,7 +56,8 @@ async def test_instagram_container_poll_publish_and_permalink():
     first=await a.step(aid,request('image'),{})
     assert first['checkpoint']['container_id']=='container' and first['retry_after']==60
     second=await a.step(aid,request('image'),first['checkpoint'])
-    final=await a.step(aid,request('image'),second['checkpoint'])
+    third=await a.step(aid,request('image'),second['checkpoint'])
+    final=await a.step(aid,request('image'),third['checkpoint'])
     assert final['state']=='succeeded'
     assert [r.url.path.rsplit('/',1)[-1] for r in seen if r.method=='POST']==['media','media_publish']
 

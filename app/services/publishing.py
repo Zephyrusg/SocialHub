@@ -147,7 +147,10 @@ class PublishingService:
                     return False
             if aid == 'pixelpapa-instagram':
                 # Adding Instagram to the account allowlist must not activate images too.
-                if request['content_type'] != 'reel' or not active.instagram_reels_publishing_enabled:
+                if request['content_type'] == 'image':
+                    if not active.instagram_photos_enabled or not active.media_delivery_enabled:
+                        return False
+                elif request['content_type'] != 'reel' or not active.instagram_reels_publishing_enabled:
                     return False
         return True
 
@@ -158,6 +161,8 @@ class PublishingService:
             return target['state'] in {'processing','retryable','uncertain'} and stage in {'yt_processing','delivered'}
         if target['state'] in {'processing', 'retryable'} and stage in {'delivered', 'video_processing'}:
             return True
+        if request['content_type'] == 'image' and stage in {'ig_photo_processing', 'ig_photo_ready'}:
+            return target['state'] in {'processing', 'retryable'} and stage == 'ig_photo_processing'
         return (request['content_type'] == 'reel'
                 and ((target['state'] in {'processing', 'retryable'} and stage in REEL_READ_STAGES)
                      or (target['state'] == 'uncertain' and stage in REEL_READ_STAGES | REEL_UPLOAD_STAGES | REEL_READY_STAGES)))
@@ -175,7 +180,7 @@ class PublishingService:
             if stage == 'ig_reel_ready' or stage not in REEL_READ_STAGES | REEL_UPLOAD_STAGES | {'fb_reel_ready'}:
                 return 'manual_reconciliation'
             return 'poll_status'
-        if stage in REEL_READ_STAGES | {'delivered', 'video_processing'}:
+        if stage in REEL_READ_STAGES | {'delivered', 'video_processing', 'ig_photo_processing'}:
             return 'poll_status'
         return 'execute_next_step'
 
@@ -356,7 +361,7 @@ class PublishingService:
         require_write_accounts(self.settings, current['preview']['request']['account_ids'])
         self.require_platforms(active, current['preview']['request'])
         if not self.media_write_allowed(current['preview']['request']):
-            raise HubError('facebook_media_publishing_disabled' if 'pixelpapa-facebook' in current['preview']['request']['account_ids'] else 'youtube_publishing_disabled' if current['preview']['request'].get('youtube') else 'instagram_reels_publishing_disabled', 'Media publishing is not activated for every selected target; the prepared preview is preserved')
+            raise HubError('facebook_media_publishing_disabled' if 'pixelpapa-facebook' in current['preview']['request']['account_ids'] else 'youtube_publishing_disabled' if current['preview']['request'].get('youtube') else 'instagram_photos_disabled' if current['preview']['request']['content_type'] == 'image' else 'instagram_reels_publishing_disabled', 'Media publishing is not activated for every selected target; the prepared preview is preserved')
         for target in current['targets']:
             if (self.refreshable(target, current['preview']['request'])
                     and isinstance(self.context(target['account_id'], execute=False)[2], (MetaPublishingConnector, YouTubePublishingConnector))):
@@ -533,14 +538,14 @@ class PublishingService:
             aid, created, attempts = target.account_id, approval.used_at, target.attempts
             checkpoint = dict(target.checkpoint)
             finish_attempt = None
-            if item.payload['request']['content_type'] == 'reel' and aid == 'pixelpapa-instagram':
+            if item.payload['request']['content_type'] in {'reel', 'image'} and aid == 'pixelpapa-instagram':
                 if approval.request_hash != item.request_hash:
                     raise HubError('reconciliation_denied', 'The recorded authorization does not match this immutable preview')
                 for event in db.scalars(select(Audit).where(Audit.operation == 'execute_publication',
                         Audit.account_id == aid, Audit.outcome == 'uncertain').order_by(Audit.at.desc()).limit(100)):
                     detail = event.details
                     if (detail.get('publication_id') == publication_id and detail.get('target_id') == target_id
-                            and detail.get('stage') == 'ig_reel_ready'
+                            and detail.get('stage') == ('ig_photo_ready' if item.payload['request']['content_type'] == 'image' else 'ig_reel_ready')
                             and detail.get('container_id') == checkpoint.get('container_id')):
                         finish_attempt = event.at
                         break
@@ -553,24 +558,25 @@ class PublishingService:
             raise HubError('manual_check_required', 'Reply outcome needs a parent-bound reply reader; no automatic resend is allowed')
         if request['operation'] == 'update' and remote_id != request['post_id']:
             raise HubError('reconciliation_denied', 'An edit can only reconcile its original owned post ID')
+        instagram_photo = request['operation'] == 'publish' and request['content_type'] == 'image' and account.platform == 'instagram'
         instagram_reel = request['operation'] == 'publish' and request['content_type'] == 'reel' and account.platform == 'instagram'
         if request['operation'] == 'publish' and request['content_type'] not in {'text', 'link', 'image'} and not instagram_reel and account.platform!='youtube':
             raise HubError('manual_check_required', 'Video/Reel reconciliation requires verified processing evidence; no resend is allowed')
         if account.platform=='youtube':
             post = await adapter.verify_reconciliation(account.remote_id,request,remote_id,created,preview['preview']['assets'][0])
-        elif instagram_reel:
-            from app.services.reel_reconciliation import verified_instagram_reel
-            post = await verified_instagram_reel(adapter, account.remote_id, request, checkpoint,
+        elif instagram_reel or instagram_photo:
+            from app.services.reel_reconciliation import verified_instagram_media
+            post = await verified_instagram_media(adapter, account.remote_id, request, checkpoint,
                                                   remote_id, created, finish_attempt)
         else:
             post = await adapter.connector.get_post(account.remote_id, remote_id)
         remote_text = post.get('message') if account.platform == 'facebook' else post.get('caption')
         if account.platform=='youtube':remote_text = ''  # Structured metadata verified by its own provider reader.
-        if instagram_reel and remote_text is None:
+        if (instagram_reel or instagram_photo) and remote_text is None:
             remote_text = ''
         if remote_text != request['text']:
             raise HubError('reconciliation_denied', 'Remote text does not match the approved publication')
-        if request['content_type'] == 'image':
+        if request['content_type'] == 'image' and not instagram_photo:
             photos = (post.get('attachments') or {}).get('data', [])
             if account.platform != 'facebook' or len(photos) != 1 or photos[0].get('type') != 'photo':
                 raise HubError('reconciliation_denied', 'Owner-selected image outcome must contain exactly one Facebook photo')
@@ -598,7 +604,7 @@ class PublishingService:
                 target.result.update(privacy_requested=request['youtube']['visibility'],privacy_actual=post.get('status',{}).get('privacyStatus'),
                     public_visibility_confirmed=post.get('status',{}).get('privacyStatus')=='public',processing_confirmed=True)
             target.checkpoint = {'stage': 'delivered', 'remote_id': remote_id, 'reconciled': True}
-            if instagram_reel or account.platform=='youtube':
+            if instagram_reel or instagram_photo or account.platform=='youtube':
                 target.checkpoint = dict(checkpoint, **target.checkpoint)
             target.error_code, target.error_message, target.next_attempt_at = None, None, None
             self.remember_post(db, publication_id, target)
@@ -606,8 +612,8 @@ class PublishingService:
                 'request_hash': item.request_hash, 'mutation_attempted': False, 'attempts_unchanged': True}
             if request['content_type'] == 'image':
                 details['media_evidence'] = 'owner-selected remote ID, caption, execution time and single photo; remote bytes not hash-equated'
-            if instagram_reel:
+            if instagram_reel or instagram_photo:
                 details.update(container_id=checkpoint['container_id'], previous_stage=checkpoint['stage'],
-                    media_evidence='PUBLISHED saved container and unique account-owned Reel with exact caption and bounded execution time; remote bytes not hash-equated')
+                    media_evidence='PUBLISHED saved container and unique account-owned media of the correct type with exact caption and bounded execution time; remote bytes not hash-equated')
             db.add(Audit(subject=issuer, operation='reconcile_publication', account_id=aid, outcome='success', details=details))
         return self.review(publication_id, None)

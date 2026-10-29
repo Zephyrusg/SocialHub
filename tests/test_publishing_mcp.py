@@ -46,7 +46,11 @@ async def test_mcp_prepare_approve_execute_and_legacy_preview(tmp_path,monkeypat
             assert 'uncertain' in executing['description'] and 'same requested workflow' in executing['description']
             assert status_tool['annotations']['readOnlyHint'] is True
             assert 'GETs only' in status_tool['description'] and 'Never publishes' in status_tool['description']
-            assert len(names)==20
+            assert len(names)==21
+            artwork=descriptions['prepare_instagram_artwork']
+            assert artwork['annotations']['readOnlyHint'] is False
+            assert 'publish manually there' in artwork['description']
+            assert artwork['inputSchema']['properties']['purpose']['enum']==['feed','story']
             normalization=descriptions['normalize_media']
             assert normalization['annotations']['readOnlyHint'] is False
             assert normalization['annotations']['idempotentHint'] is True

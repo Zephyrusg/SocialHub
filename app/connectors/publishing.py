@@ -99,7 +99,7 @@ class MetaPublishingConnector(ReelWorkflows):
             return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': state.get('permalink')}}
         fields = 'id,permalink' if self.platform == 'instagram' else ('id,link' if state.get('lookup_kind') == 'photo' else 'id,permalink_url')
         info = await self.read(state['remote_id'], {'fields': fields})
-        if request['content_type'] == 'reel' and not self.permalink(info):
+        if (request['content_type'] == 'reel' or (self.platform == 'instagram' and request['content_type'] == 'image')) and not self.permalink(info):
             return {'state': 'processing', 'checkpoint': state, 'retry_after': 60}
         return {'state': 'succeeded', 'checkpoint': state, 'result': {'remote_id': state['remote_id'], 'permalink': self.permalink(info)}}
 
@@ -107,6 +107,8 @@ class MetaPublishingConnector(ReelWorkflows):
         self.connector.check_account(account_id)
         if checkpoint.get('stage') == 'delivered':
             return await self.finalize_delivery(account_id, request, checkpoint)
+        if self.platform == 'instagram' and request['content_type'] == 'image':
+            return await self.photo_refresh(checkpoint)
         if request['content_type'] == 'reel':
             return await self.reel_refresh(account_id, request, checkpoint)
         if (self.platform != 'facebook' or request['operation'] != 'publish'
@@ -169,7 +171,36 @@ class MetaPublishingConnector(ReelWorkflows):
             result['checkpoint']['lookup_kind'] = 'photo'
         return result
 
+    async def photo_refresh(self, checkpoint):
+        state = dict(checkpoint)
+        if state.get('stage') not in {'ig_photo_processing', 'ig_photo_ready'}:
+            raise HubError('reconciliation_denied', 'Unknown photo checkpoint; no replacement created')
+        info = await self.read(state['container_id'], {'fields': 'status_code'})
+        status = info.get('status_code')
+        if status in {'ERROR', 'EXPIRED'}:
+            raise HubError('media_processing_failed', 'Instagram photo container failed or expired; no replacement created', diagnostics={'mutation_attempted': False})
+        if status == 'PUBLISHED':
+            raise HubError('write_outcome_unknown', 'Saved photo container is published; reconcile its media ID without republishing', diagnostics={'mutation_attempted': False})
+        state['stage'] = 'ig_photo_ready' if status == 'FINISHED' else 'ig_photo_processing'
+        return {'state': 'processing', 'checkpoint': state, 'retry_after': 0 if status == 'FINISHED' else 60}
+
     async def instagram(self, account_id, request, state):
+        if request['content_type'] == 'image':
+            if not state:
+                response = await self.connector.create_media_container(account_id, request['media_url'], request['text'], 'IMAGE')
+                cid = self.remote_id(response)
+                return {'state': 'processing', 'checkpoint': {'stage': 'ig_photo_processing', 'container_id': cid, 'remote_id': cid}, 'retry_after': 60}
+            if state.get('stage') == 'ig_photo_processing':
+                return await self.photo_refresh(state)
+            if state.get('stage') != 'ig_photo_ready':
+                raise HubError('reconciliation_denied', 'Unknown photo checkpoint; no replacement created')
+            ready = await self.photo_refresh(state)
+            if ready['checkpoint']['stage'] != 'ig_photo_ready':
+                return ready
+            response = await self.graph.mutate('POST', f'{account_id}/media_publish', {'creation_id': state['container_id']})
+            result = self.delivered(self.remote_id(response))
+            result['checkpoint']['container_id'] = state['container_id']
+            return result
         if not state:
             response = await self.connector.create_media_container(account_id, request['media_url'], request['text'], 'REELS' if request['content_type'] == 'reel' else 'IMAGE')
             return {'state': 'processing', 'checkpoint': {'stage': 'ig_container', 'container_id': self.remote_id(response)}, 'retry_after': 60}

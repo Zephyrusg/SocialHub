@@ -102,3 +102,5 @@ Development project, not a production support promise. A project license has not
 ## Local operational records
 
 Keep environment-specific infrastructure reports and personal test records in the ignored `private/` folder. It is also excluded from Docker build contexts and is not included in public clones. Public account identifiers in the intentional PixelPapa allowlist are retained; no account restriction has been relaxed.
+
+Instagram single-photo publishing and assisted native-Music Stories: see [Phase 3H.1 workflow and rollout](docs/instagram-photos-music-stories.md). Both new capabilities default off; Story publishing/music selection remain manual in Instagram.

@@ -150,3 +150,7 @@ encoding/browser/test dependencies. No new production dependency was added.
 These development checks did not modify production. Subsequent approved rollout
 and configuration changes are recorded separately in ignored operational records;
 the development results are not evidence of a live social-media publication.
+
+### Instagram Photos and Music Story Artwork
+
+`instagram_photos` and `instagram_story_artwork` are implemented, independent, off-by-default preferences. See [Phase 3H.1](instagram-photos-music-stories.md) for dependencies, the explicit-off rollout helper, required initial environment restart and manual Music Story boundary. Both use this same Settings form, authorization, confirmation rules, revision/CAS and encrypted audit-backed persistence. Runtime changes need no restart.

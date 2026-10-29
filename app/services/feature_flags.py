@@ -14,7 +14,9 @@ FEATURES = {
     'facebook_images': ('Facebook Images', 'Publish a validated image with a caption; requires signed media delivery.', True),
     'facebook_videos': ('Facebook Videos', 'Publish a regular Facebook video; requires signed media delivery.', True),
     'facebook_reels': ('Facebook Reels', 'Publish a validated MP4 using the native Reel workflow.', True),
-    'instagram_publishing': ('Instagram Publishing', 'Instagram Reels only; other Instagram formats are not activated here.', True),
+    'instagram_publishing': ('Instagram Publishing', 'Pause Instagram publication execution; individual format switches still apply.', True),
+    'instagram_photos': ('Instagram Photos', 'Publish one validated JPEG feed photo after explicit approval; requires signed delivery.', True),
+    'instagram_story_artwork': ('Instagram Music Story Artwork', 'Prepare vertical artwork and a phone download. Choose the official Music track and publish manually in Instagram.', False),
     'youtube_publishing': ('YouTube Publishing', 'Upload only to the verified allowlisted channel, under the reviewed visibility.', True),
     'youtube_shorts': ('YouTube Shorts', 'Upload square/vertical MP4 up to three minutes; YouTube determines classification.', True),
     'youtube_videos': ('YouTube Standard Videos', 'Upload validated videos with structured metadata and resumable progress.', True),
@@ -27,7 +29,7 @@ FEATURES = {
     'attachment_probe': ('Attachment Validation Probe', 'Download and validate an allowlisted ChatGPT attachment without storing it.', False),
     'scheduling': ('Scheduling', 'Live scheduling is not implemented; existing mock jobs do not publish.', True),
 }
-DYNAMIC_FIELDS = {'publishing_enabled', 'facebook_media_publishing_enabled', 'facebook_media_allowed_types',
+DYNAMIC_FIELDS = {'instagram_photos_enabled', 'instagram_story_artwork_enabled', 'publishing_enabled', 'facebook_media_publishing_enabled', 'facebook_media_allowed_types',
     'instagram_reels_publishing_enabled', 'media_ingestion_enabled', 'media_delivery_enabled',
     'media_attachment_probe_enabled', 'media_normalization_enabled', 'approval_mode',
     'youtube_publishing_enabled','youtube_shorts_enabled','youtube_videos_enabled'}
@@ -50,12 +52,12 @@ def load_flags(base, db):
 
 
 UNSUPPORTED = {'scheduling', 'youtube_thumbnails', 'youtube_scheduling'}
-OFF_DEFAULT = {'media_normalization','youtube_publishing','youtube_shorts','youtube_videos','youtube_thumbnails','youtube_scheduling'}
+OFF_DEFAULT = {'instagram_photos', 'instagram_story_artwork', 'media_normalization','youtube_publishing','youtube_shorts','youtube_videos','youtube_thumbnails','youtube_scheduling'}
 
 def states(base, values):
     live = base.meta_live_writes and base.publishing_enabled
     fb = live and 'pixelpapa-facebook' in base.meta_write_account_ids
-    ig = live and 'pixelpapa-instagram' in base.meta_write_account_ids and base.instagram_reels_publishing_enabled
+    ig = live and 'pixelpapa-instagram' in base.meta_write_account_ids and (base.instagram_reels_publishing_enabled or base.instagram_photos_enabled)
     delivery = base.media_delivery_enabled
     direct = bool(base.approval_mode == 'chatgpt_direct' and base.auth_mode == 'oauth'
         and base.chatgpt_direct_tested and base.chatgpt_residual_risk_accepted
@@ -67,6 +69,8 @@ def states(base, values):
         'media_import': base.media_ingestion_enabled, 'chatgpt_direct': direct,
         'media_delivery': delivery, 'attachment_probe': bool(base.media_attachment_probe_enabled and base.media_download_hosts),
         'scheduling': False}
+    available['instagram_photos'] = bool(ig and base.instagram_photos_enabled and delivery and base.media_public_base_url)
+    available['instagram_story_artwork'] = bool(base.instagram_story_artwork_enabled and base.media_ingestion_enabled and delivery and base.media_public_base_url)
     for kind in ['image', 'video', 'reel']:
         available['facebook_' + {'image':'images', 'video':'videos', 'reel':'reels'}[kind]] = bool(
             fb and base.facebook_media_publishing_enabled and kind in base.facebook_media_allowed_types
@@ -82,6 +86,8 @@ def states(base, values):
     for name in ['facebook_images', 'facebook_videos', 'facebook_reels']:
         result[name]['effective'] &= result['facebook_publishing']['effective']
         if name != 'facebook_reels': result[name]['effective'] &= result['media_delivery']['effective']
+    result['instagram_photos']['effective'] &= result['instagram_publishing']['effective'] and result['media_delivery']['effective']
+    result['instagram_story_artwork']['effective'] &= result['media_import']['effective'] and result['media_delivery']['effective']
     for name in ['youtube_shorts','youtube_videos']:
         result[name]['effective'] &= result['youtube_publishing']['effective']
     # New conversion is opt-in even before any persistent preference exists.
@@ -109,6 +115,8 @@ def apply_flags(result, base, db):
             if kind in base.facebook_media_allowed_types and values.get('facebook_'+name, True)],
         'facebook_media_publishing_enabled': base.facebook_media_publishing_enabled and values.get('facebook_publishing', True),
         'instagram_reels_publishing_enabled': base.instagram_reels_publishing_enabled and values.get('instagram_publishing', True)}
+    changes['instagram_photos_enabled'] = enabled('instagram_photos')
+    changes['instagram_story_artwork_enabled'] = enabled('instagram_story_artwork')
     for key in ['youtube_publishing_enabled','youtube_shorts_enabled','youtube_videos_enabled']:
         changes[key] = enabled(key.removesuffix('_enabled'))
     if any(n in values for n in ['facebook_publishing','instagram_publishing']):
