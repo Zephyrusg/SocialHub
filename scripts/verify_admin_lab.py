@@ -63,12 +63,13 @@ async def main():
             assert r.status_code==200
             await helpers.browser_finish(page,ORIGIN+'/admin/oidc/login','/admin/','owner',credentials['password'])
             assert urlsplit(page.url).path=='/admin/'
-            text=await page.content();assert 'Publishing permission for this verified subject: yes' in text and 'Live writes: disabled' in text
+            text=await page.content();assert 'Publishing permission for this verified subject: yes' in text and 'Paused' in text
             assert credentials['password'] not in text and credentials['admin_client_secret'] not in text
             CHECKS['real_admin_code_pkce_mfa_login']=True;CHECKS['owner_has_both_roles']=True
             assert (await http.get(ORIGIN+'/approval/')).status_code==404;CHECKS['approval_portal_not_required']=True
             synthetic_secret=secrets.token_urlsafe(32)
             CHECKS['stage_setup_form']=True
+            await page.goto(ORIGIN+'/admin/connections')
             await page.locator('input[name="app_id"]').fill('12345')
             await page.locator('input[name="app_secret"]').fill(synthetic_secret)
             CHECKS['stage_setup_filled']=True
@@ -84,8 +85,8 @@ async def main():
             CHECKS['setup_error_categories']=[x for x in ['form verification','Setup changed','could not complete','format','Administrator identity'] if x in (body or '')]
             CHECKS['stage_setup_clicked']=True
             assert saved_response.status==303
-            await page.wait_for_url(ORIGIN+'/admin/')
-            text=await page.content();assert 'Secret saved: yes' in text and synthetic_secret not in text
+            await page.wait_for_url(ORIGIN+'/admin/connections?saved=meta')
+            text=await page.content();assert 'Secret configured' in text and synthetic_secret not in text
             CHECKS['encrypted_meta_setup_and_redaction']=True
             # Prove data and session persistence across only this disposable app's recreation.
             command(COMPOSE+['up','-d','--no-deps','--force-recreate','socialhub'])
@@ -95,7 +96,7 @@ async def main():
                     if r.status_code==200:break
                 except httpx.HTTPError:pass
                 await asyncio.sleep(.5)
-            await page.reload();assert 'Secret saved: yes' in await page.content();CHECKS['setup_and_session_survive_app_recreation']=True
+            await page.reload();assert 'Secret configured' in await page.content();CHECKS['setup_and_session_survive_app_recreation']=True
             outsider=await browser.new_context(ignore_https_errors=True);await outsider.route('**/*',local_only);other=await outsider.new_page()
             await helpers.browser_finish(other,ORIGIN+'/admin/oidc/login','/admin/oidc/callback','outsider',credentials['password'])
             assert 'Administrator identity' in await other.content()

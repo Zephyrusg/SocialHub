@@ -3,25 +3,24 @@ import asyncio
 from html import escape
 from urllib.parse import parse_qs
 import logging
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 from app.core import HubError
 from app.database.models import Audit
 from app.security.origins import browser_request
 from app.services.administration import Administration, AdminSessions, AdminOIDC
 from app.services.meta_oauth import MetaOAuth
 from app.services.feature_flags import FeatureFlags, FEATURES
+from app.admin_ui import ASSETS, SECTIONS, layout, render, notice
 
 COOKIE = '__Secure-socialhub-admin'
 FLOW_COOKIE = '__Secure-socialhub-admin-oidc'
 HEADERS = {'Cache-Control': 'no-store', 'Pragma': 'no-cache', 'Referrer-Policy': 'strict-origin',
-    'Content-Security-Policy': "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    'Content-Security-Policy': "default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
     'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY'}
 
 
-def page(body, status=200):
-    return HTMLResponse('<!doctype html><html lang="en"><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width"><title>SocialHub setup</title>'
-        '<main><h1>SocialHub setup</h1>' + body + '</main></html>', status_code=status, headers=HEADERS)
+def page(body, status=200, *, section='overview', title=None, csrf=None):
+    return HTMLResponse(layout(body, section=section, title=title, csrf=csrf), status_code=status, headers=HEADERS)
 
 
 def register_admin_routes(mcp, settings, sessions):
@@ -54,7 +53,13 @@ def register_admin_routes(mcp, settings, sessions):
         }
         status, message = messages.get(code, (503, 'Setup could not complete. Check local readiness and start a fresh login if needed.'))
         if status == 503:logging.getLogger('socialhub').warning('admin_operation_failed')
-        return page('<p>' + message + '</p><a href="/admin/oidc/login">Sign in with your existing account</a>', status)
+        needs_login = code in {'portal_denied', 'admin_denied'}
+        if needs_login:
+            action = '<a class="button primary" href="/admin/oidc/login">Sign in with your existing account</a>'
+        else:
+            target = '/admin/connections' if code in {'invalid_setup', 'meta_not_connected'} else '/admin/features' if code in {'invalid_feature', 'configuration_conflict', 'feature_confirmation_required', 'feature_unavailable'} else '/admin/'
+            action = '<a class="button primary" href="' + target + '">Reload and review settings</a>'
+        return page('<section class="card action-panel">' + notice(message, 'error') + action + '<a class="button secondary" href="/admin/">Return to dashboard</a></section>', status, title='Administrator access' if needs_login else 'Action could not complete')
 
     async def form(request, fields):
         subject = await owner(request)
@@ -105,38 +110,40 @@ def register_admin_routes(mcp, settings, sessions):
         response.delete_cookie(FLOW_COOKIE, path='/admin/oidc', secure=True, httponly=True, samesite='lax')
         return response
 
-    @mcp.custom_route('/admin/', methods=['GET'])
-    async def dashboard(request):
+    async def view(request, section):
         try:
             subject = await owner(request)
+            if section not in SECTIONS:
+                return page(notice('This administration page was not found.', 'error'), 404, title='Page not found')
             status = await asyncio.to_thread(setup.status, subject)
-            csrf = escape(browser.csrf(request.cookies[COOKIE]), quote=True)
-            hidden = '<input type="hidden" name="csrf" value="' + csrf + '"><input type="hidden" name="revision" value="' + str(status['revision']) + '">'
-            roles = '<p>Administrator: yes. Publishing permission for this verified subject: ' + ('yes' if status['publishing_permission'] else 'no') + '.</p>'
-            gates = '<p>Live writes: ' + ('enabled by operator' if status['live_writes'] else 'disabled') + '. Approval policy: ' + escape(status['approval_mode']) + '. Each write still needs its required approval.</p>'
-            accounts = '<ul>' + ''.join('<li>' + escape(a['account_id']) + ': ' + ('connected' if a['connected'] else 'not connected or expired') + '</li>' for a in status['accounts']) + '</ul>'
-            body = roles + gates + '<h2>Meta connection</h2>' + accounts
-            body += '<p>Use the main Facebook App credentials. Secret saved: ' + ('yes' if status['meta_secret_configured'] else 'no') + '. Secret values are never displayed.</p>'
-            body += '<form method="post" action="/admin/meta/settings">' + hidden + '<label>Facebook App ID <input required name="app_id" maxlength="64" value="' + escape(status['meta_app_id'], quote=True) + '"></label><label>App Secret <input type="password" name="app_secret" maxlength="256" autocomplete="new-password"></label><p>Leave the secret blank to keep the current value. Changing credentials disables reads and requires a fresh account connection.</p><button>Save Meta settings</button></form>'
-            body += '<form method="post" action="/admin/meta/connect">' + hidden + '<button>Connect Facebook and Instagram</button></form>'
-            body += '<p>Live account reads: ' + ('enabled' if status['live_reads'] else 'disabled') + '.</p><form method="post" action="/admin/meta/reads">' + hidden + '<input type="hidden" name="enabled" value="' + ('false' if status['live_reads'] else 'true') + '"><button>' + ('Disable' if status['live_reads'] else 'Enable verified') + ' account reads</button></form>'
             feature_status = await asyncio.to_thread(flags.status, subject)
-            body += '<h2>Feature Flags</h2><p>Configured preferences persist immediately. Deployment restrictions are hard limits; enabling a feature never approves a post. Disabling stops new execution, but cannot recall requests already sent to Meta. Read-only reconciliation remains available.</p>'
-            body += '<table><thead><tr><th scope="col">Feature</th><th scope="col">Configured</th><th scope="col">Available</th><th scope="col">Effective</th><th scope="col">Control</th></tr></thead><tbody>'
-            for feature in feature_status['features']:
-                configured = ('Inherit deployment' if feature['default_enabled'] else 'Off by default') if feature['configured'] is None else ('On' if feature['configured'] else 'Off')
-                on = feature['effective']
-                # Allow an explicitly paused preference to be resumed even when
-                # another runtime dependency is off; effective state stays off.
-                requested = feature['configured'] if feature['configured'] is not None else feature['default_enabled']
-                desired = not requested
-                body += '<tr><th scope="row">' + escape(feature['label']) + '<p>' + escape(feature['description']) + '</p></th><td>' + configured + '</td><td>' + ('Yes' if feature['available'] else 'No') + '</td><td>' + ('On' if on else 'Off') + '<p>' + escape(feature['reason']) + '</p></td><td>'
-                if feature['available']:
-                    body += '<form method="post" action="/admin/features"><input type="hidden" name="csrf" value="' + csrf + '"><input type="hidden" name="revision" value="' + str(feature_status['revision']) + '"><input type="hidden" name="feature" value="' + feature['name'] + '"><input type="hidden" name="enabled" value="' + ('true' if desired else 'false') + '"><input type="hidden" name="confirmation" value="no"><button role="switch" aria-checked="' + ('true' if requested else 'false') + '" aria-label="' + escape(feature['label'], quote=True) + '">' + ('Enable' if desired else 'Disable') + '</button></form>'
-                else:body += '<button disabled aria-label="' + escape(feature['label'], quote=True) + '">Unavailable</button>'
-                body += '</td></tr>'
-            body += '</tbody></table><p>Identity roles, account allowlists, encryption keys, public origins and deployment ceilings remain protected operator configuration.</p><form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="' + csrf + '"><button>Sign out</button></form>'
-            return page(body)
+            csrf = browser.csrf(request.cookies[COOKIE])
+            query = request.query_params.get('q', '')[:120].strip()
+            group = request.query_params.get('category', '')[:40]
+            state = request.query_params.get('state', '')
+            if state not in {'enabled', 'disabled', 'unavailable'}: state = ''
+            html = render(section, status, feature_status, csrf, query=query,
+                          selected_category=group, selected_state=state,
+                          saved=request.query_params.get('saved', ''))
+            return HTMLResponse(html, headers=HEADERS)
+        except Exception as exc:return error(exc)
+
+    @mcp.custom_route('/admin/', methods=['GET'])
+    async def dashboard(request):
+        return await view(request, 'overview')
+
+    @mcp.custom_route('/admin/{section}', methods=['GET'])
+    async def section_page(request):
+        return await view(request, request.path_params['section'])
+
+    @mcp.custom_route('/admin/assets/{asset}', methods=['GET'])
+    async def asset(request):
+        try:
+            boundary(request)
+            name = request.path_params['asset']
+            if name not in ASSETS:
+                return Response(status_code=404, headers=HEADERS)
+            return Response(ASSETS[name], media_type='text/css' if name.endswith('.css') else 'text/javascript', headers=HEADERS)
         except Exception as exc:return error(exc)
 
     @mcp.custom_route('/admin/features', methods=['POST'])
@@ -152,9 +159,9 @@ def register_admin_routes(mcp, settings, sessions):
                 if current['revision'] != values['revision']:raise HubError('configuration_conflict', 'Features changed')
                 if not next(f for f in current['features'] if f['name'] == name)['available']:raise HubError('feature_unavailable', 'Feature unavailable')
                 hidden = ''.join('<input type="hidden" name="' + key + '" value="' + escape(str(value), quote=True) + '">' for key, value in (values | {'confirmation':'yes'}).items())
-                return page('<h2>Enable ' + escape(FEATURES[name][0]) + '?</h2><p>This allows the corresponding write workflow within deployment restrictions. It does not approve any content. Existing authentication, account restrictions, immutable previews and approval policy still apply. ChatGPT direct mode relies on an authenticated chat instruction; the server cannot independently verify user consent.</p><form method="post" action="/admin/features">' + hidden + '<button>Confirm enable</button></form><a href="/admin/">Cancel</a>')
+                return page('<section class="card action-panel"><h2>Enable ' + escape(FEATURES[name][0]) + '?</h2><p>This allows the corresponding write workflow within deployment restrictions. It does not approve any content. Existing authentication, account restrictions, immutable previews and approval policy still apply. ChatGPT direct mode relies on an authenticated chat instruction; the server cannot independently verify user consent.</p><form method="post" action="/admin/features">' + hidden + '<button class="button primary" data-loading-label="Saving…">Confirm enable</button></form><a class="button secondary" href="/admin/features">Cancel</a></section>', section='features', title='Confirm feature change', csrf=values['csrf'])
             await asyncio.to_thread(flags.save, subject, values['revision'], name, enabled, acknowledged=values['confirmation'] == 'yes')
-            return RedirectResponse('/admin/', status_code=303, headers=HEADERS)
+            return RedirectResponse('/admin/features?saved=feature', status_code=303, headers=HEADERS)
         except Exception as exc:return error(exc)
 
     @mcp.custom_route('/admin/meta/settings', methods=['POST'])
@@ -162,7 +169,7 @@ def register_admin_routes(mcp, settings, sessions):
         try:
             subject, values = await form(request, {'csrf', 'revision', 'app_id', 'app_secret'})
             await asyncio.to_thread(setup.save, subject, values['revision'], app_id=values['app_id'], app_secret=values['app_secret'] or None)
-            return RedirectResponse('/admin/', status_code=303, headers=HEADERS)
+            return RedirectResponse('/admin/connections?saved=meta', status_code=303, headers=HEADERS)
         except Exception as exc:return error(exc)
 
     @mcp.custom_route('/admin/meta/connect', methods=['POST'])
@@ -179,7 +186,7 @@ def register_admin_routes(mcp, settings, sessions):
             link = await asyncio.to_thread(issue)
             # Start cross-origin OAuth through a fresh GET navigation rather than
             # a form redirect, which would conflict with form-action 'self'.
-            return page('<p>Continue to Facebook to select and verify the allowlisted accounts.</p><a href="' + escape(link, quote=True) + '">Continue to Facebook</a>')
+            return page('<section class="card action-panel"><h2>Connect your Meta accounts</h2><p>Continue to Facebook to select and verify the allowlisted accounts.</p><a class="button primary" href="' + escape(link, quote=True) + '">Continue to Facebook</a><a class="button secondary" href="/admin/connections">Cancel</a></section>', section='connections', title='Connect Meta')
         except Exception as exc:return error(exc)
 
     @mcp.custom_route('/admin/meta/reads', methods=['POST'])
@@ -188,7 +195,7 @@ def register_admin_routes(mcp, settings, sessions):
             subject, values = await form(request, {'csrf', 'revision', 'enabled'})
             if values['enabled'] not in {'true', 'false'}:raise HubError('admin_denied', 'Invalid read setting')
             await asyncio.to_thread(setup.save, subject, values['revision'], live_reads=values['enabled'] == 'true')
-            return RedirectResponse('/admin/', status_code=303, headers=HEADERS)
+            return RedirectResponse('/admin/connections?saved=reads', status_code=303, headers=HEADERS)
         except Exception as exc:return error(exc)
 
     @mcp.custom_route('/admin/logout', methods=['POST'])
@@ -196,7 +203,7 @@ def register_admin_routes(mcp, settings, sessions):
         try:
             _, values = await form(request, {'csrf'})
             await asyncio.to_thread(browser.logout, request.cookies.get(COOKIE))
-            response = page('<p>Signed out of SocialHub setup.</p>')
+            response = page('<section class="card action-panel"><h2>Signed out</h2><p>Signed out of SocialHub setup.</p><a class="button primary" href="/admin/oidc/login">Sign in again</a></section>', title='Signed out')
             response.delete_cookie(COOKIE, path='/admin', secure=True, httponly=True, samesite='lax')
             return response
         except Exception as exc:return error(exc)

@@ -131,8 +131,8 @@ async def test_ui_owner_csrf_origin_warning_and_stale_confirmation(sessions):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN) as c:
         assert (await c.post('/admin/features', data={})).status_code == 403
         c.cookies.set('__Secure-socialhub-admin', token)
-        page = await c.get('/admin/')
-        assert page.status_code == 200 and '<h2>Feature Flags</h2>' in page.text
+        page = await c.get('/admin/features')
+        assert page.status_code == 200 and '<h1>Feature Flags</h1>' in page.text
         assert 'Inherit deployment' in page.text and 'Unavailable' in page.text
         assert 'role="switch"' in page.text and 'Scheduling' in page.text
         csrf = re.search(r'name="csrf" value="([a-f0-9]+)"', page.text)[1]
