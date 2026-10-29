@@ -333,3 +333,12 @@ async def test_lost_initial_session_never_blindly_retries_server_error(yt_settin
     service.connector_factory=lambda a,execute:YouTubePublishingConnector(YouTubeConnector(yt_settings,sessions,a,transport),execute)
     r=await execute();assert r['state']=='attention_required'
     calls=len(g.calls);await execute();assert len(g.calls)==calls
+
+async def test_disconnect_invalidates_pending_oauth_and_inflight_revision(yt_settings,sessions):
+    g,oauth=await connected(yt_settings,sessions)
+    url,cookie=oauth.start('owner',1);state=parse_qs(urlsplit(url).query)['state'][0]
+    setup=YouTubeSetup(yt_settings,sessions);setup.disconnect('owner')
+    assert setup.configuration()[0]==2
+    count=len(g.calls)
+    with pytest.raises(HubError):await oauth.complete(state,cookie,'synthetic-code')
+    assert len(g.calls)==count

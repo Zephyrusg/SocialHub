@@ -82,6 +82,9 @@ class YouTubeSetup:
     def disconnect(self, subject):
         self.authorize(subject)
         with self.sessions.begin() as db:
+            config=db.scalar(select(SiteConfiguration).where(SiteConfiguration.id=='youtube').with_for_update())
+            if config:config.revision+=1  # Invalidate pending/exchanging browser flows as well.
+            db.execute(delete(SiteConfiguration).where(SiteConfiguration.id.like('ytflow:%')))
             db.execute(delete(Credential).where(Credential.account_id==ACCOUNT))
             a=db.get(Account,ACCOUNT)
             if a:a.allowlisted=False
